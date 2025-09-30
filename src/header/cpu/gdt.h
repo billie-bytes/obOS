@@ -27,14 +27,30 @@ extern struct GDTR _gdt_gdtr;
  */
 struct SegmentDescriptor {
     // First 32-bit
-    uint16_t segment_low;
-    uint16_t base_low;
+    uint16_t segment_low;              /* Segment Limit (bits 0--15)*/
+    uint16_t base_low;                 /* Base (bits 0--15)*/
 
     // Next 16-bit (Bit 32 to 47)
-    uint8_t base_mid;
-    uint8_t type_bit   : 4;
-    uint8_t non_system : 1;
+    uint8_t base_mid;                  /* Base (bits 16--23)*/
+
+    // Access Byte
+    uint8_t type_bit              : 4; /* Segment type (TYPE) */
+    uint8_t non_system            : 1; /* Descriptor type (S)*/
     // TODO : Continue SegmentDescriptor definition
+    uint8_t privilege_bit         : 2; /* Descriptor Privilege Level (DPL)*/
+    uint8_t present_bit           : 1; /* Segment Present (P) */
+
+    // Next 16-bit (Bit 48 to 63)
+    // Limit Byte
+    uint8_t limit_bit             : 4; /* Segment Limit */
+
+    // Flags Byte
+    uint8_t available_bit         : 1; /* Available for use by system software (AVL) */
+    uint8_t long_bit              : 1; /* 64-bit code segment (L) N.B. (IA-32e mode only) */      
+    uint8_t default_operation_bit : 1; /* Default operation size (D/B) */
+    uint8_t granularity_bit       : 1; /* Granularity (G) */
+
+    uint8_t base_high;                 /* Base (base 24--31)*/
 
 } __attribute__((packed));
 
