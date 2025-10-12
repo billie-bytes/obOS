@@ -1,3 +1,4 @@
 {
     "debug.onTaskErrors": "debugAnyway",
+    "C_Cpp.dimInactiveRegions": false,
 }
