@@ -1,0 +1,115 @@
+#ifndef _INTERRUPT_H
+#define _INTERRUPT_H
+#include <stdint.h>
+
+#define PIC1		0x20		/* IO base address for master PIC */
+#define PIC2		0xA0		/* IO base address for slave PIC */
+#define PIC1_COMMAND	PIC1
+#define PIC1_DATA	(PIC1+1)
+#define PIC2_COMMAND	PIC2
+#define PIC2_DATA	(PIC2+1)
+
+#define PIC1_OFFSET  0x20
+#define PIC2_OFFSET  0x28
+
+#define ICW1_ICW4    0x01
+#define ICW1_INIT    0x10
+#define ICW4_8086    0x01
+
+#define PIC_DISABLE_ALL_MASK 0xFF
+#define PIC_ACK 0x20
+
+// PIC Master
+#define IRQ_TIMER        0
+#define IRQ_KEYBOARD     1
+#define IRQ_CASCADE      2
+#define IRQ_COM2         3
+#define IRQ_COM1         4
+#define IRQ_LPT2         5
+#define IRQ_FLOPPY_DISK  6
+#define IRQ_LPT1_SPUR    7
+
+// PIC Slave
+#define IRQ_CMOS         8
+#define IRQ_PERIPHERAL_1 9
+#define IRQ_PERIPHERAL_2 10
+#define IRQ_PERIPHERAL_3 11
+#define IRQ_MOUSE        12
+#define IRQ_FPU          13
+#define IRQ_PRIMARY_ATA  14
+#define IRQ_SECOND_ATA   15
+
+/**
+ * CPURegister, store CPU registers values.
+ * 
+ * @param index   CPU index register (di, si)
+ * @param stack   CPU stack register (bp, sp)
+ * @param general CPU general purpose register (a, b, c, d)
+ * @param segment CPU extra segment register (gs, fs, es, ds)
+ */
+struct CPURegister {
+	struct {
+		uint32_t edi;       // 0
+		uint32_t esi;       // 4
+	} __attribute__((packed)) index;
+	struct {
+		uint32_t ebp;       // 8
+		uint32_t esp;       // 12
+	} __attribute__((packed)) stack;
+	struct {
+		uint32_t ebx;       // 16
+		uint32_t edx;       // 20
+		uint32_t ecx;       // 24
+		uint32_t eax;       // 28
+	} __attribute__((packed)) general;
+	struct {
+		uint32_t gs;        // 32
+		uint32_t fs;        // 36
+		uint32_t es;        // 40
+		uint32_t ds;        // 44
+	} __attribute__((packed)) segment;
+} __attribute__((packed));
+
+/**
+ * InterruptStack, data pushed by CPU when interrupt / exception is raised.
+ * Refer to Intel x86 Vol 3a: Figure 6-4 Stack usage on transfer to Interrupt.
+ * 
+ * Note, when returning from interrupt handler with iret, esp must be pointing to eip pushed before 
+ * or in other words, CPURegister, int_number and error_code should be pop-ed from stack.
+ * 
+ * @param error_code Error code that pushed with the exception
+ * @param eip        Instruction pointer where interrupt is raised
+ * @param cs         Code segment selector where interrupt is raised
+ * @param eflags     CPU eflags register when interrupt is raised
+ */
+struct InterruptStack {
+    uint32_t error_code;
+    uint32_t eip;
+    uint32_t cs;
+    uint32_t eflags;
+    uint32_t esp_privilege_change;
+    uint32_t ss_privilege_change;
+} __attribute__((packed));
+
+/**
+ * InterruptFrame, entirety of general CPU states exactly before interrupt.
+ * When used for interrupt handler, cpu.stack is kernel state before C function called,
+ * not user stack when it get called. Check InterruptStack and interprivilege interrupt for more detail.
+ * 
+ * @param cpu        CPU state
+ * @param int_number Interrupt vector value
+ * @param int_stack  Hardware-defined (x86) stack state, note: will not access interprivilege ss and esp
+ */
+struct InterruptFrame {
+    struct CPURegister    cpu;
+    uint32_t              int_number;
+    struct InterruptStack int_stack;
+} __attribute__((packed));
+
+void io_wait(void);
+void pic_ack(uint8_t irq);
+void pic_remap(void);
+void main_interrupt_handler(struct InterruptFrame frame);
+void activate_keyboard_interrupt(void);
+
+#endif
