@@ -131,6 +131,14 @@ void keyboard_process_scancode(uint8_t sc) {
         alt  = !is_break;  
         return;
     }
+    if (make == 0x0E) { // backspace
+        if (!is_break) keyboard_add_buffer('\b');
+        return;
+    }
+    if (make == 0x1C) { // enter
+        if (!is_break) keyboard_add_buffer('\n');
+        return;
+    }
 
     if (is_break) return;
 
