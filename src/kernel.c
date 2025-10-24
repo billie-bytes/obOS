@@ -5,6 +5,7 @@
 #include "header/cpu/interrupt.h"
 #include "header/cpu/idt.h"
 #include "header/driver/keyboard.h"
+#include "header/driver/disk.h"
 #include <stdbool.h>
 
 void kernel_setup(void) {
@@ -16,6 +17,11 @@ void kernel_setup(void) {
     framebuffer_set_cursor(0, 0);
     int row = 0, col = 0;
     keyboard_state_activate();
+
+    struct BlockBuffer b;
+    for (int i = 0; i < 512; i++) b.buf[i] = i % 16;
+    write_blocks(&b, 17, 1);
+
     while (true) {
         char c;
         get_keyboard_buffer(&c);
