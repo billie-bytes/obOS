@@ -6,6 +6,7 @@
 #include "header/cpu/idt.h"
 #include "header/driver/keyboard.h"
 #include "header/driver/disk.h"
+#include "header/filesystem/ext2.h"
 #include <stdbool.h>
 
 void kernel_setup(void) {
@@ -18,9 +19,9 @@ void kernel_setup(void) {
     int row = 0, col = 0;
     keyboard_state_activate();
 
-    struct BlockBuffer b;
-    for (int i = 0; i < 512; i++) b.buf[i] = i % 16;
-    write_blocks(&b, 17, 1);
+    /*FILESYSTEM INITIALIZATION*/
+    initialize_filesystem_ext2();
+    // create_ext2();
 
     while (true) {
         char c;
