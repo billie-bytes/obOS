@@ -16,6 +16,44 @@ const uint8_t fs_signature[BLOCK_SIZE] = {
 };
 
 /**
+ * @brief create a new directory using given node
+ * first item of directory table is its node location (name will be .)
+ * second item of directory is its parent location (name will be ..)
+ * @param node pointer of inode
+ * @param inode inode that already allocated
+ * @param parent_inode inode of parent directory (if root directory, the parent is itself)
+ */
+void init_directory_table(struct EXT2Inode *node, uint32_t inode, uint32_t parent_inode){
+    node->i_mode = EXT2_S_IFDIR;
+    node->i_size = BLOCK_SIZE;                     // one block used for entries
+    node->i_blocks = 1;             // count in 512-byte sectors
+    node->i_links_count = 2;                       // '.' and one link from parent
+    
+    struct BlockBuffer b;
+    memset(&b, 0, BLOCK_SIZE);
+
+    // '.' entry
+    struct EXT2DirectoryEntry *current_entry = (struct EXT2DirectoryEntry *) &b;
+    current_entry->inode = inode; // self inode
+    current_entry->rec_len = 12; // 1 byte for '.'
+    current_entry->name_len = 1; // 1 byte for '.'
+    current_entry->file_type = EXT2_FT_DIR; // directory type
+
+    memcpy(current_entry->name, ".", 1); // name is '.'
+
+    // '..' entry
+    struct EXT2DirectoryEntry *parent_entry = get_next_directory_entry(current_entry);
+    parent_entry->inode = parent_inode; // parent inode
+    parent_entry->rec_len = 12; // 1 byte for '..'
+    parent_entry->name_len = 2; // 1 byte for '..'
+    parent_entry->file_type = EXT2_FT_DIR; // directory type
+
+    memcpy(parent_entry->name, ".", 1); // name is '.'
+    allocate_node_blocks(b, node, inode_to_bgd(inode));          // allocate 1 data block for dir table
+    sync_node(node, inode);                     // write inode to disk
+}
+
+/**
  * @brief get a free inode from the disk, assuming it is always available
  * @return new inode
  */
