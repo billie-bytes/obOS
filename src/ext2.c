@@ -556,7 +556,7 @@ int8_t read(struct EXT2DriverRequest request){
     
     // Read block group descriptor table
     struct EXT2BlockGroupDescriptorTable bgd_table;
-    read_blocks(&bgd_table, 2, 1); // BGD table is at block 2
+    read_blocks(&bgd_table, 3, 1); // 0 fs_signature, 1-2 superblock, 3 bgdt
     
     // Calculate block containing the parent inode
     uint32_t parent_table_block = bgd_table.table[parent_group].bg_inode_table + 
