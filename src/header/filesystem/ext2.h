@@ -20,7 +20,6 @@
 #define INODES_PER_GROUP (INODES_PER_TABLE * INODES_TABLE_BLOCK_COUNT) // number of inodes per group
 
 
-
 /**
  * inodes constant 
  * - reference: https://www.nongnu.org/ext2-doc/ext2.html#inode-table
@@ -95,8 +94,6 @@ struct EXT2Superblock
 
 
 }__attribute__((packed));
-
-
 
 
 /**
@@ -214,6 +211,7 @@ struct EXT2DirectoryEntry
      * 8bit unsigned value used to indicate file type.
      */
     uint8_t file_type;
+    char* name;
 
 }__attribute__((packed));
 
@@ -358,6 +356,13 @@ int8_t delete(struct EXT2DriverRequest request);
 uint32_t allocate_node(void); 
 
 /**
+ * @brief Allocate a free data block from disk.
+ * @param prefered_bgd The preferred block group to allocate from.
+ * @return The absolute block number (1-based) of the allocated block.
+ */
+uint32_t allocate_block(uint32_t prefered_bgd);
+
+/**
  * @brief deallocate node from the disk, will also deallocate its used blocks
  * also all of the blocks of indirect blocks if necessary
  * @param inode that needs to be deallocated
@@ -400,6 +405,6 @@ void allocate_node_blocks(void *ptr, struct EXT2Inode *node, uint32_t prefered_b
  * @param node pointer of node
  * @param inode location of the node
  */
-void sync_node(struct EXT2Inode *node, uint32_t inode);
+void write_node_disk(struct EXT2Inode *node, uint32_t inode);
 
 #endif

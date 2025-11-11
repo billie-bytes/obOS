@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 #include "header/stdlib/string.h"
 #include "header/filesystem/ext2.h"
 #define BLOCKS_COUNT (DISK_SPACE/BLOCK_SIZE)
@@ -17,12 +18,12 @@ const uint8_t fs_signature[BLOCK_SIZE] = {
     [BLOCK_SIZE-1] = 'k',
 };
 
-static void write16toBlock(uint16_t value, struct BlockBuffer* block, uint16_t offset){
-    if(offset>511){
-        return;
-    }
+uint32_t write16toBlock(uint16_t value, struct BlockBuffer* block, uint16_t offset){
+    if(offset>510) return 0;
+
     block->buf[offset] = (uint8_t)(value & 0xFF);
     block->buf[offset+1] = (uint8_t)(value>>8 & 0xFF);
+    return 1;
 }
 // static uint16_t read16fromBlock(struct BlockBuffer* block, uint16_t offset){
 //     if(offset>511){
@@ -33,14 +34,14 @@ static void write16toBlock(uint16_t value, struct BlockBuffer* block, uint16_t o
 //     value = value | (uint16_t)block->buf[offset]<<8;
 //     return value;
 // }
-static void write32toBlock(uint32_t value, struct BlockBuffer* block, uint16_t offset){
-    if(offset>511){
-        return;
-    }
+uint32_t write32toBlock(uint32_t value, struct BlockBuffer* block, uint16_t offset){
+    if(offset>508) return 0;
+
     block->buf[offset] = (uint8_t)(value & 0xFF);
     block->buf[offset+1] = (uint8_t)(value>>8 & 0xFF);
     block->buf[offset+2] = (uint8_t)(value>>16 & 0xFF);
     block->buf[offset+3] = (uint8_t)(value>>24 & 0xFF);
+    return 1;
 }
 
 // static uint32_t read32fromBlock(struct BlockBuffer block, uint16_t offset){
@@ -55,17 +56,72 @@ static void write32toBlock(uint32_t value, struct BlockBuffer* block, uint16_t o
 //     return value;
 // }
 
-void writeInodeToBlock(struct BlockBuffer* block, struct EXT2Inode inode, uint16_t offset){
+uint32_t writeStringtoBlock(char* string, struct BlockBuffer* block, uint16_t offset){
+    if(offset+strlen(string)>512||strlen(string)==0) return 0;
+
+    for(int i = 0; i<strlen(string);i++){//strlen doesnt count null terminator, but we also doesnt need to write the null terminator
+        block->buf[offset+i] = string[i];
+    }
+    return 1;
+}
+uint32_t writeInodeToBlock(struct BlockBuffer* block, struct EXT2Inode inode, uint16_t offset){
+    if(offset+INODE_SIZE>512) return 0;
+
     write16toBlock(inode.i_mode,block,offset);
     write32toBlock(inode.i_size,block,offset+2);
     write32toBlock(inode.i_blocks,block,offset+6);
     for(uint16_t i = 0; i<15; i++){
         write32toBlock(inode.i_block[i],block,offset+10+(i*4));
     }
+    return 1;
+}
+/**
+ * @brief Takes an inode number and puts the content of that inode from disk into the logical inode
+ * @param inode_num The inode number that is
+ */
+uint32_t read_inode(uint32_t inode_num, struct EXT2Inode* inode){
+    if(inode_num>INODES_COUNT){
+        return 0;
+    }
+    uint32_t block_group_index = inode_to_bgd(inode);
+    uint32_t inode_idx_in_group = inode_to_local(inode); //idx of inode relative to the bgd
+    uint32_t block_idx_in_table = inode_idx_in_group/INODES_PER_TABLE; //idx of the block of inode (one block holds 7 inodes in the table)
+    uint32_t inode_idx_in_block = inode_idx_in_group%INODES_PER_TABLE;
+    /**
+     * example: inode 247
+     * block_group_index = 2 (its in the 3rd block group)
+     * inode_idx_in_group = 23 (its the 24th inode in the block group)
+     * block_idx_in_table = 3 (the 4th block in the table contains the inode, each block contains 7 inode)
+     * inode_idx_in_block = 2 (meaning its the 3rd inode in the 4th block)
+     */
+    struct BlockBuffer table;
+    uint32_t inode_block_idx = BLOCKS_PER_GROUP*block_group_index+6+inode_idx_in_group;
+    /**
+     * 6 = 1 (fs_signature) + 2 (superblock) + 1 (group desc) + 1 (block bitmap) + 1 (inode bitmap)
+     * 
+     * example, the first inode in the 2nd block group (bg_idx=1) would be
+     * 1024*1 + 6 + 0 = 1030
+     * 1 (fs signature) + 1024 (bg1) + 2 (superblock) + 3 (g_desc, bitmaps) = 1030
+     * so it would be the 1031st block, which is in index 1030
+     */
+    read_blocks(&table,inode_block_idx,1); 
+    memcpy(inode, &table.buf[inode_idx_in_block*INODE_SIZE], INODE_SIZE);
+    return 1;
+}
+
+uint32_t writeEntryToBlock(struct BlockBuffer* block, struct EXT2DirectoryEntry entry, uint16_t offset){
+    if(offset+strlen(entry.name)+9>512) return 0; //9 is an entry's size without the name
+
+    write32toBlock(entry.inode,block,offset);
+    write16toBlock(entry.rec_len,block,offset+4);
+    write16toBlock(entry.name_len,block,offset+6);
+    block->buf[8] = entry.file_type;
+    return writeStringtoBlock(entry.name, block, offset+9);   
 }
 
 
 static struct EXT2Superblock superBlock;
+
 static void superBlockWrite(uint32_t blockGroupIndex){
     struct BlockBuffer b;
     for(int i = 0; i<512; i++) b.buf[i] = 0; //memset the block buffer into 0
@@ -127,10 +183,10 @@ void create_ext2(){
 }
 
 bool is_empty_storage(){
-    struct BlockBuffer b;
-    read_blocks(&b,0,1);
+    struct BlockBuffer boot_sector;
+    read_blocks(&boot_sector,0,1);
     for(int i=0;i<512;i++){
-        if(b.buf[i]!=fs_signature[i]){
+        if(boot_sector.buf[i]!=fs_signature[i]){
             return true;
         }
     }
@@ -243,7 +299,7 @@ static void initialize_block_groups(){
     root_inode.i_blocks = 1; //1 block for root directory entry
     root_inode.i_size = BLOCK_SIZE;
     root_inode.i_mode = EXT2_S_IFDIR;
-    root_inode.i_block[0] = 22; //0-21 is used for bootsector and block group metadata
+    root_inode.i_block[0] = 22; //block 0-21 is used for bootsector and block group metadata
     for(int i = 1; i < 15; i++){
         root_inode.i_block[i] = 0;
     }
@@ -309,4 +365,187 @@ void initialize_filesystem_ext2(){
         create_ext2();
         initialize_block_groups(&b_group_descriptor_table);
     }
+}
+
+uint32_t inode_to_bgd(uint32_t inode){
+    return (inode-1)/INODES_PER_GROUP;
+}
+
+uint32_t inode_to_local(uint32_t inode){
+    return (inode-1)%INODES_PER_GROUP;
+}
+
+
+void init_directory_table(struct EXT2Inode *node, uint32_t inode, uint32_t parent_inode){
+    node->i_mode = EXT2_S_IFDIR;
+    node->i_size = BLOCK_SIZE;                     // one block used for entries
+    node->i_blocks = 1;             // count in 512-byte sectors
+    // node->i_links_count = 2;                       // '.' and one link from parent
+    
+    struct BlockBuffer b;
+    memset(&b, 0, BLOCK_SIZE);
+
+    // '.' entry
+    struct EXT2DirectoryEntry *current_entry = (struct EXT2DirectoryEntry *) &b;
+    current_entry->inode = inode; // self inode
+    current_entry->rec_len = 12; // 1 byte for '.'
+    current_entry->name_len = 1; // 1 byte for '.'
+    current_entry->file_type = EXT2_FT_DIR; // directory type
+
+    memcpy(current_entry->name, ".", 1); // name is '.'
+
+    // '..' entry
+    struct EXT2DirectoryEntry *parent_entry = get_next_directory_entry(current_entry);
+    parent_entry->inode = parent_inode; // parent inode
+    parent_entry->rec_len = 12; // 1 byte for '..'
+    parent_entry->name_len = 2; // 1 byte for '..'
+    parent_entry->file_type = EXT2_FT_DIR; // directory type
+
+    memcpy(parent_entry->name, ".", 1); // name is '.'
+    allocate_node_blocks(b.buf, node, inode_to_bgd(inode));          // allocate 1 data block for dir table
+    write_node_disk(node, inode);                     // write inode to disk
+}
+
+uint32_t allocate_node(void){
+    struct EXT2BlockGroupDescriptorTable b_group_descriptor_table;
+    read_blocks(&b_group_descriptor_table, 3, 1); //Block 0 boot sector, 1-2 superblock, 3 bgdt
+    struct BlockBuffer bitmap_buf;
+    
+    for(int bgd_idx = 0; bgd_idx < GROUPS_COUNT; bgd_idx++){
+        struct EXT2BlockGroupDescriptor *bgd = &b_group_descriptor_table.table[bgd_idx];
+        read_blocks(&bitmap_buf, bgd->bg_inode_bitmap, 1); // read inode bitmap
+        // cari bitmap yang kosong
+        // Search for first free inode bit (0 = free)
+        for (uint32_t bit_idx = 0; bit_idx < INODES_PER_GROUP; bit_idx++) {
+            if (!bitmapget(&bitmap_buf, bit_idx)) {
+                // Found a free inode → allocate it
+                bitmapset(&bitmap_buf, bit_idx, 1);
+
+                // Write updated bitmap back to disk
+                write_blocks(&bitmap_buf, bgd->bg_inode_bitmap, 1);
+
+                // Update group descriptor info
+                bgd->bg_free_inodes_count--;
+
+                // Write back the updated block group descriptor table
+                write_blocks(&b_group_descriptor_table, 2, 1);
+
+                // Compute global inode number (1-based)
+                uint32_t inode_number = bgd_idx * INODES_PER_GROUP + bit_idx + 1;
+
+                // return inode number
+                return inode_number;
+            }
+        }
+    }
+    return INODES_COUNT+1;//error code gaada inode yang kosong
+}
+
+
+uint32_t allocate_block(uint32_t prefered_bgd) {
+    struct EXT2BlockGroupDescriptorTable b_group_descriptor_table;
+    read_blocks(&b_group_descriptor_table, 3, 1); //Block 0 boot sector, 1-2 superblock, 3 bgdt
+
+    struct BlockBuffer bitmap_buf;
+
+    // Try to allocate from the preferred block group first
+    for (uint32_t attempt = 0; attempt < GROUPS_COUNT; attempt++) {
+        uint32_t bgd_idx = (prefered_bgd + attempt) % GROUPS_COUNT;
+        struct EXT2BlockGroupDescriptor *bgd = &b_group_descriptor_table.table[bgd_idx];
+
+        read_blocks(&bitmap_buf, bgd->bg_block_bitmap, 1); // read block bitmap
+
+        // Find first 0 bit = free block
+        for (uint32_t bit_idx = 0; bit_idx < BLOCKS_PER_GROUP; bit_idx++) {
+            if (!bitmapget(&bitmap_buf, bit_idx)) {
+                bitmapset(&bitmap_buf, bit_idx, 1); // mark allocated
+                write_blocks(&bitmap_buf, bgd->bg_block_bitmap, 1);
+
+                // Update metadata
+                bgd->bg_free_blocks_count--;
+                write_blocks(&b_group_descriptor_table, 2, 1);
+
+                // Compute global block number
+                uint32_t block_number = (bgd_idx * BLOCKS_PER_GROUP) + bit_idx;
+
+                return block_number;
+            }
+        }
+    }
+
+    // No free block found
+    return 0;
+}
+
+
+void allocate_node_blocks(void *ptr, struct EXT2Inode *node, uint32_t prefered_bgd){
+    uint32_t total_blocks = (node->i_size + BLOCK_SIZE - 1) / BLOCK_SIZE; // calculate total blocks needed
+    uint8_t *data_ptr = (uint8_t *)ptr;
+    uint32_t blocks_allocated = 0;
+
+    // Allocate direct blocks
+    for (int i = 0; i < 12 && blocks_allocated < total_blocks; i++) {
+        node->i_block[i] = allocate_block(prefered_bgd);
+        write_blocks(data_ptr + (blocks_allocated * BLOCK_SIZE), node->i_block[i], 1);
+        blocks_allocated++;
+    }
+
+    // Allocate single indirect block if needed
+    if (blocks_allocated < total_blocks) {
+        node->i_block[12] = allocate_block(prefered_bgd);
+        uint32_t indirect_block_data[BLOCK_SIZE / sizeof(uint32_t)];
+
+        for (int i = 0; i < BLOCK_SIZE / sizeof(uint32_t) && blocks_allocated < total_blocks; i++) {
+            indirect_block_data[i] = allocate_block(prefered_bgd);
+            write_blocks(data_ptr + (blocks_allocated * BLOCK_SIZE), indirect_block_data[i], 1);
+            blocks_allocated++;
+        }
+        write_blocks(indirect_block_data, node->i_block[12], 1);
+    }
+
+    // Allocate double indirect block if needed
+    if (blocks_allocated < total_blocks) {
+        node->i_block[13] = allocate_block(prefered_bgd);
+
+        uint32_t double_indirect_data[BLOCK_SIZE / sizeof(uint32_t)];
+        for (int i = 0; i < BLOCK_SIZE / sizeof(uint32_t) && blocks_allocated < total_blocks; i++) {
+            double_indirect_data[i] = allocate_block(prefered_bgd);
+            uint32_t single_indirect_data[BLOCK_SIZE / sizeof(uint32_t)];
+
+            for (int j = 0; j < BLOCK_SIZE / sizeof(uint32_t) && blocks_allocated < total_blocks; j++) {
+                single_indirect_data[j] = allocate_block(prefered_bgd);
+                write_blocks(data_ptr + (blocks_allocated * BLOCK_SIZE), single_indirect_data[j], 1);
+                blocks_allocated++;
+            }
+            write_blocks(single_indirect_data, double_indirect_data[i], 1);
+        }
+        write_blocks(double_indirect_data, node->i_block[13], 1);
+    }
+}
+
+
+void write_node_disk(struct EXT2Inode *node, uint32_t inode){
+    uint32_t bgd_idx = inode_to_bgd(inode);
+    uint32_t index_in_group = inode_to_local(inode);
+
+    struct EXT2BlockGroupDescriptorTable b_group_descriptor_table;
+    read_blocks(&b_group_descriptor_table, 3, 1); // Block 0 boot sector, 1-2 superblock, 3 bgdt
+
+    struct EXT2BlockGroupDescriptor *bgd = &b_group_descriptor_table.table[bgd_idx];
+    uint32_t inode_table_block = bgd->bg_inode_table;
+    
+    uint32_t inode_block_offset = index_in_group / INODES_PER_TABLE;
+    uint32_t inode_offset_within_block = index_in_group % INODES_PER_TABLE;
+
+    struct EXT2Inode inode_buf[INODES_PER_TABLE];
+    read_blocks(&inode_buf, inode_table_block + inode_block_offset, 1);
+    inode_buf[inode_offset_within_block] = *node;
+    write_blocks(&inode_buf, inode_table_block + inode_block_offset, 1);
+}
+
+
+
+int8_t write(struct EXT2DriverRequest *request){
+    uint32_t inode = allocate_node();
+
 }
