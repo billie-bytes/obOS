@@ -5,6 +5,8 @@
 #include "header/cpu/interrupt.h"
 #include "header/cpu/idt.h"
 #include "header/driver/keyboard.h"
+#include "header/driver/disk.h"
+#include "header/filesystem/ext2.h"
 #include <stdbool.h>
 
 void kernel_setup(void) {
@@ -16,6 +18,11 @@ void kernel_setup(void) {
     framebuffer_set_cursor(0, 0);
     int row = 0, col = 0;
     keyboard_state_activate();
+
+    /*FILESYSTEM INITIALIZATION*/
+    initialize_filesystem_ext2();
+    // create_ext2();
+
     while (true) {
         char c;
         get_keyboard_buffer(&c);
