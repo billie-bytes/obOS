@@ -51,8 +51,7 @@ struct EXT2DriverRequest
     uint8_t name_len; 
     uint32_t parent_inode; 
     uint32_t buffer_size; 
-
-    bool is_directory; 
+    bool is_folder; 
 }__attribute__((packed));
 
 /**
@@ -234,18 +233,17 @@ char *get_entry_name(void *entry);
 
 /**
  * get the directory entry from the buffer
- * @param ptr the buffer that contains the directory table
- * @param offset the offset of the entry 
+ * @param node the node of the directory
  * @return the directory entry
  */
-struct EXT2DirectoryEntry *get_directory_entry(void *ptr, uint32_t offset);
+struct EXT2DirectoryEntry get_directory_entry(struct EXT2Inode parent_node, char* name);
 
 /**
  * get the next directory entry from the current entry
  * @param entry the current entry
  * @return the next directory entry
  */
-struct EXT2DirectoryEntry *get_next_directory_entry(struct EXT2DirectoryEntry *entry);
+struct EXT2DirectoryEntry get_next_directory_entry(struct EXT2DirectoryEntry entry);
 
 /**
  * get the record length of the entry
@@ -337,7 +335,7 @@ int8_t read(struct EXT2DriverRequest request);
  * @param All attribute will be used for write except is_dir, buffer_size == 0 then create a folder / directory. It is possible that exist file with name same as a folder
  * @return Error code: 0 success - 1 file/folder already exist - 2 invalid parent folder - -1 unknown
  */
-int8_t write(struct EXT2DriverRequest *request);
+int8_t write(struct EXT2DriverRequest request);
 
 /**
  * @brief EXT2 delete, delete a file or empty directory in file system
@@ -351,9 +349,10 @@ int8_t delete(struct EXT2DriverRequest request);
 /**
  * @brief get a free inode from the disk, assuming it is always
  * available
+ * @param preferred_bgd searches for inode in the preferred block group (usually in the same bgd as its parent folder)
  * @return new inode
  */
-uint32_t allocate_node(void); 
+uint32_t allocate_node(uint32_t preferred_bgd); 
 
 /**
  * @brief Allocate a free data block from disk.
@@ -398,13 +397,13 @@ uint32_t deallocate_block(uint32_t *locations, uint32_t blocks, struct BlockBuff
  * 
  * @attention only implement until doubly indirect block, if you want to implement triply indirect block please increase the storage size to at least 256MB
  */
-void allocate_node_blocks(void *ptr, struct EXT2Inode *node, uint32_t prefered_bgd);
+void allocate_node_blocks(void *ptr, struct EXT2Inode node, uint32_t prefered_bgd);
 
 /**
  * @brief update the node to the disk
  * @param node pointer of node
  * @param inode location of the node
  */
-void write_node_disk(struct EXT2Inode *node, uint32_t inode);
+void write_node_disk(struct EXT2Inode node, uint32_t inode);
 
 #endif
