@@ -25,6 +25,26 @@ void kernel_setup(void) {
     paging_init_page_manager_state();
     initialize_filesystem_ext2();
     // create_ext2();
+    /* TSS INITIALIZATION FOR USER MODE */
+    gdt_install_tss();
+    set_tss_register();
+
+    // Allocate first 4 MiB virtual memory
+    paging_allocate_user_page_frame(&_paging_kernel_page_directory, (uint8_t*) 0);
+
+    // Write shell into memory
+    struct EXT2DriverRequest request = {
+        .buf                          = (uint8_t*) 0,
+        .name                         = "shell",
+        .parent_inode                 = 1,
+        .buffer_size                  = 0x100000,
+        .name_len                     = 5,
+    };
+    read(request);
+
+    // Set TSS $esp pointer and jump into shell 
+    set_tss_kernel_current_stack();
+    kernel_execute_user_program((uint8_t*) 0);
 
     while (true) {
         char c;
