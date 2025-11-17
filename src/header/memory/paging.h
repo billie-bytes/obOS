@@ -87,6 +87,7 @@ struct PageManagerState {
     uint32_t free_page_frame_count;
 } __attribute__((packed));
 
+void paging_init_page_manager_state(void);
 
 /**
  * Edit page directory with respective parameter

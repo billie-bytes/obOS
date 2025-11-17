@@ -7,19 +7,22 @@
 #include "header/driver/keyboard.h"
 #include "header/driver/disk.h"
 #include "header/filesystem/ext2.h"
+#include "header/memory/paging.h"
 #include <stdbool.h>
 
 void kernel_setup(void) {
     load_gdt(&_gdt_gdtr);
     pic_remap();
+    asm volatile("sti");
     initialize_idt();
     activate_keyboard_interrupt();
     framebuffer_clear();
     framebuffer_set_cursor(0, 0);
     int row = 0, col = 0;
     keyboard_state_activate();
-
+    
     /*FILESYSTEM INITIALIZATION*/
+    paging_init_page_manager_state();
     initialize_filesystem_ext2();
     // create_ext2();
 
