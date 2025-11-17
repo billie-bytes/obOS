@@ -1,8 +1,3 @@
-#include <stdint.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <string.h>
-#include "header/stdlib/string.h"
 #include "header/filesystem/ext2.h"
 #define BLOCKS_COUNT (DISK_SPACE/BLOCK_SIZE)
 #define INODES_COUNT INODES_PER_GROUP*GROUPS_COUNT
@@ -76,8 +71,8 @@ uint32_t read_inode(uint32_t inode_num, struct EXT2Inode* inode){
     if(inode_num>INODES_COUNT){
         return 0;
     }
-    uint32_t block_group_index = inode_to_bgd(inode);
-    uint32_t inode_idx_in_group = inode_to_local(inode); //idx of inode relative to the bgd
+    uint32_t block_group_index = inode_to_bgd(inode_num);
+    uint32_t inode_idx_in_group = inode_to_local(inode_num); //idx of inode relative to the bgd
     uint32_t block_idx_in_table = inode_idx_in_group/INODES_PER_TABLE; //idx of the block of inode (one block holds 7 inodes in the table)
     uint32_t inode_idx_in_block = inode_idx_in_group%INODES_PER_TABLE;
     /**
@@ -88,7 +83,7 @@ uint32_t read_inode(uint32_t inode_num, struct EXT2Inode* inode){
      * inode_idx_in_block = 2 (meaning its the 3rd inode in the 4th block)
      */
     struct BlockBuffer table;
-    uint32_t inode_block_idx = BLOCKS_PER_GROUP*block_group_index+6+inode_idx_in_group;
+    uint32_t inode_block_idx = BLOCKS_PER_GROUP*block_group_index+6+block_idx_in_table;
     /**
      * 6 = 1 (fs_signature) + 2 (superblock) + 1 (group desc) + 1 (block bitmap) + 1 (inode bitmap)
      * 
@@ -118,7 +113,7 @@ uint32_t read_inode_blocks(uint32_t inode, uint32_t index){
     uint32_t indirect_block_idx;
     uint32_t direct_block_idx;
 
-    uint32_t data_block_logical_address;
+
     /*Value initialization of indices*/
     if(index<12){
         direct_block_idx = index;
@@ -443,7 +438,7 @@ void init_directory_table(struct EXT2Inode *node, uint32_t inode, uint32_t paren
     parent_entry.name_len = 2; // 2 byte for '..'
     parent_entry.file_type = EXT2_FT_DIR; // directory type
     char parent_name[2] = {'.','.'};
-    parent_entry.name = &parent_name;
+    parent_entry.name = parent_name;
 
     memcpy((void*)&b, (void*)&current_entry, 9);
     memcpy((void*)&b.buf[9], (void*)&cur_name, 1);
@@ -520,7 +515,6 @@ static bool find_dir_entry_in_block(struct BlockBuffer b, char* name, struct EXT
 
 struct EXT2DirectoryEntry get_directory_entry(struct EXT2Inode parent_node, char* name){
     struct BlockBuffer temp_block;
-    struct EXT2Inode temp_node;
     struct EXT2DirectoryEntry result;
     memset((void*)&result, 0, sizeof(struct EXT2DirectoryEntry));
     
@@ -730,7 +724,7 @@ uint32_t allocate_node(uint32_t preferred_bgd){
     read_blocks(&b_group_descriptor_table, 3, 1); //Block 0 boot sector, 1-2 superblock, 3 bgdt
     struct BlockBuffer bitmap_buf;
     
-    for(int attempt = 0; attempt < GROUPS_COUNT; attempt++){
+    for(unsigned int attempt = 0; attempt < GROUPS_COUNT; attempt++){
         uint32_t bgd_idx = (preferred_bgd + attempt) % GROUPS_COUNT;
 
         struct EXT2BlockGroupDescriptor *bgd = &b_group_descriptor_table.table[bgd_idx];
@@ -850,7 +844,7 @@ void allocate_node_blocks(void *ptr, struct EXT2Inode node, uint32_t prefered_bg
         uint32_t indirect_block_data[BLOCK_SIZE / sizeof(uint32_t)];
         memset(indirect_block_data,0,BLOCK_SIZE);
 
-        for (int i = 0; i < BLOCK_SIZE / sizeof(uint32_t) && blocks_allocated < total_blocks; i++) {
+        for (unsigned int i = 0; i < BLOCK_SIZE / sizeof(uint32_t) && blocks_allocated < total_blocks; i++) {
             indirect_block_data[i] = allocate_block(prefered_bgd);
             write_blocks(data_ptr + (blocks_allocated * BLOCK_SIZE), indirect_block_data[i], 1);
             blocks_allocated++;
@@ -864,12 +858,12 @@ void allocate_node_blocks(void *ptr, struct EXT2Inode node, uint32_t prefered_bg
 
         uint32_t double_indirect_data[BLOCK_SIZE / sizeof(uint32_t)];
         memset(double_indirect_data, 0, BLOCK_SIZE);
-        for (int i = 0; i < BLOCK_SIZE / sizeof(uint32_t) && blocks_allocated < total_blocks; i++) {
+        for (unsigned int i = 0; i < BLOCK_SIZE / sizeof(uint32_t) && blocks_allocated < total_blocks; i++) {
             double_indirect_data[i] = allocate_block(prefered_bgd);
             uint32_t single_indirect_data[BLOCK_SIZE / sizeof(uint32_t)];
             memset(single_indirect_data,0,BLOCK_SIZE);
 
-            for (int j = 0; j < BLOCK_SIZE / sizeof(uint32_t) && blocks_allocated < total_blocks; j++) {
+            for (unsigned int j = 0; j < BLOCK_SIZE / sizeof(uint32_t) && blocks_allocated < total_blocks; j++) {
                 single_indirect_data[j] = allocate_block(prefered_bgd);
                 write_blocks(data_ptr + (blocks_allocated * BLOCK_SIZE), single_indirect_data[j], 1);
                 blocks_allocated++;
