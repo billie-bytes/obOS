@@ -1,4 +1,4 @@
-#include "string.h" // Use quotes for your local header
+#include "header/stdlib/string.h" // Use quotes for your local header
 
 /**
  * @brief Fills the first n bytes of the memory area pointed to by s
@@ -106,4 +106,12 @@ int strcmp(const char *s1, const char *s2) {
     // Return the difference of the characters that broke the loop.
     // This will be 0 if both are null terminators (end of string).
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
+}
+
+size_t strlen(const char *str) {
+    const char *s = str;
+    while (*s) {
+        s++;
+    }
+    return s - str;
 }

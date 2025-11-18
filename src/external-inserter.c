@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "header/filesystem/ext2.h"
 #include "header/driver/disk.h"
@@ -9,6 +10,8 @@
 // Global variable
 uint8_t *image_storage;
 uint8_t *file_buffer;
+/* Read Buffer: 4MB */
+uint8_t read_buffer[4*1024*1024]; 
 
 void read_blocks(void *ptr, uint32_t logical_block_address, uint8_t block_count) {
     for (int i = 0; i < block_count; i++) {
@@ -36,6 +39,11 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
+    bool is_replace = false;
+    if (argc >= 5 && strcmp(argv[4], "--replace") == 0) {
+        is_replace = true;
+    }
+
     // Read storage into memory, requiring 4 MB memory
     image_storage = malloc(4*1024*1024);
     file_buffer   = malloc(4*1024*1024);
@@ -61,6 +69,8 @@ int main(int argc, char *argv[]) {
     // EXT2 operations
     initialize_filesystem_ext2();
     char *name = argv[1];
+    uint8_t filename_length = strlen(name);
+
     struct EXT2DriverRequest request;
     struct EXT2DriverRequest reqread;
     printf("Filename       : %s\n", name);
@@ -95,11 +105,11 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    retcode = write(&request);
+    retcode = write(request);
     if (retcode == 1 && is_replace)
     {
-        retcode = delete (request);
-        retcode = write(&request);
+        // retcode = delete(request);
+        retcode = write(request);
     }
     if (retcode == 0)
         puts("Write success");

@@ -56,4 +56,12 @@ void *memmove(void *dest, const void *src, size_t n);
  */
 int strcmp(const char *s1, const char *s2);
 
+/**
+ * C standard strlen, calculates the length of a null-terminated string
+ * 
+ * @param str Pointer to null-terminated string
+ * @return Length of the string (excluding null terminator)
+ */
+size_t strlen(const char *str);
+
 #endif
