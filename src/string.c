@@ -108,10 +108,38 @@ int strcmp(const char *s1, const char *s2) {
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
 
-size_t strlen(const char *str) {
-    const char *s = str;
-    while (*s) {
-        s++;
+int strncmp(const char *s1, const char *s2, size_t n) {
+    while (n > 0) {
+        // Cast to unsigned char for proper comparison of extended ASCII
+        unsigned char u1 = (unsigned char)*s1;
+        unsigned char u2 = (unsigned char)*s2;
+
+        if (u1 != u2) {
+            return u1 - u2;
+        }
+
+        // If we hit the null terminator, strings are equal up to here
+        if (u1 == '\0') {
+            return 0;
+        }
+
+        s1++;
+        s2++;
+        n--;
     }
-    return s - str;
+    // If n reaches 0, the strings matched for those n characters
+    return 0;
+}
+
+/**
+ * @brief Calculate the length of a string.
+ * * @param str The string to calculate the length of.
+ * @return The length of the string.
+ */
+size_t strlen(const char *str) {
+    size_t len = 0;
+    while (str[len] != '\0') {
+        len++;
+    }
+    return len;
 }

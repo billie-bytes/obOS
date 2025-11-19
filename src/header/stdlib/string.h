@@ -55,6 +55,8 @@ void *memmove(void *dest, const void *src, size_t n);
  * @return 0 if equal, <0 if s1 < s2, >0 if s1 > s2.
  */
 int strcmp(const char *s1, const char *s2);
+int strncmp(const char *s1, const char *s2, size_t n);
+size_t strlen(const char *str);
 
 /**
  * C standard strlen, calculates the length of a null-terminated string
