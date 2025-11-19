@@ -427,11 +427,12 @@ void init_directory_table(struct EXT2Inode *node, uint32_t inode, uint32_t paren
 
 
     memcpy((void*)&b, (void*)&current_entry, DIR_SIZE+current_entry.name_len);
-    memcpy((void*)&b.buf[12], (void*)&parent_entry, DIR_SIZE+current_entry.name_len);
+    memcpy((void*)&b.buf[12], (void*)&parent_entry, DIR_SIZE+parent_entry.name_len);
 
     
     node->i_block[0] = allocate_block(inode_to_bgd(inode));
     write_blocks(&b,node->i_block[0],1);
+    write_node_disk(*node, inode);
 }
 
 
@@ -633,6 +634,8 @@ static int8_t add_entry_to_dir(uint32_t parent_inode, struct EXT2DirectoryEntry 
     }
 
     uint16_t needed_size = DIR_SIZE+new_entry.name_len;
+    if(needed_size%4!=0) needed_size += 4 - (needed_size%4); //make sure its divisible by 4
+
     uint32_t total_blocks = (parent_node.i_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
     struct BlockBuffer block_buf;
 
@@ -645,8 +648,8 @@ static int8_t add_entry_to_dir(uint32_t parent_inode, struct EXT2DirectoryEntry 
         while (offset < BLOCK_SIZE) {
             struct EXT2DirectoryEntry *curr = (struct EXT2DirectoryEntry *)&block_buf.buf[offset];
             
-            // Safety check for infinite loops
-            if (curr->rec_len == 0) return -1; 
+            
+            if (curr->rec_len == 0) return -1; // Safety check for infinite loops
 
             // Calculate how much space this entry ACTUALLY needs
             uint16_t real_used_size;
@@ -654,6 +657,7 @@ static int8_t add_entry_to_dir(uint32_t parent_inode, struct EXT2DirectoryEntry 
                 real_used_size = 0; // It's a "dead" entry, we can claim all of it
             } else {
                 real_used_size = DIR_SIZE+curr->name_len;
+                if(real_used_size%4!=0) real_used_size += 4 - (real_used_size%4); //mind the padding
             }
 
             // How much slack space is available after this entry?
@@ -664,13 +668,13 @@ static int8_t add_entry_to_dir(uint32_t parent_inode, struct EXT2DirectoryEntry 
                 uint32_t new_entry_offset = offset + real_used_size;
                 struct EXT2DirectoryEntry *inserted = (struct EXT2DirectoryEntry *)&block_buf.buf[new_entry_offset];
 
-                //Configure the new entry
+                /*Configure the new entry*/
                 inserted->inode = new_entry.inode;
                 inserted->file_type = new_entry.file_type;
                 inserted->name_len = new_entry.name_len;
                 memcpy(inserted->name, new_entry.name, new_entry.name_len);
                 
-                // The new entry inherits the remainder of the space to maintain the chain
+                /*The new entry inherits the remainder of the space to maintain the chain*/
                 inserted->rec_len = available_space; 
 
                 //Shrink the current entry (if it was active)
@@ -683,20 +687,20 @@ static int8_t add_entry_to_dir(uint32_t parent_inode, struct EXT2DirectoryEntry 
                     The logic above handles this: 
                     real_used_size=0 -> new_entry_offset=offset -> inserted overwrites curr.
                     inserted->rec_len = 512.
-                    WAIT: To optimize fully, we should split the dead entry too.*/
+                    NOTE: To optimize fully, we should split the dead entry too.*/
                     
                     
                     /*Refined Dead Entry Logic:
                     We take 'needed_size' for ourselves, and create a new hole after us.*/
                     inserted->rec_len = needed_size;
                     
-                    // Create a new hole after us if there is space left
+                    /*Create a new hole after us if there is space left*/
                     if (available_space > needed_size) {
                         struct EXT2DirectoryEntry *next_hole = (struct EXT2DirectoryEntry *)&block_buf.buf[offset + needed_size];
                         next_hole->inode = 0;
                         next_hole->rec_len = available_space - needed_size;
                     } else {
-                        // We took the exact amount, or close enough
+                        /*We took the exact amount, or close enough*/
                         inserted->rec_len = available_space; 
                     }
                 }
@@ -886,7 +890,9 @@ static int8_t remove_entry_from_dir(uint32_t parent_inode, char* name){
 
 uint32_t allocate_node(uint32_t preferred_bgd){
     struct EXT2BlockGroupDescriptorTable b_group_descriptor_table;
-    read_blocks(&b_group_descriptor_table, 3, 1); //Block 0 boot sector, 1-2 superblock, 3 bgdt
+    struct BlockBuffer temp;
+    read_blocks(&temp, 3, 1); //Block 0 boot sector, 1-2 superblock, 3 bgdt
+    memcpy(&b_group_descriptor_table, &temp, sizeof(struct EXT2BlockGroupDescriptorTable));
     struct BlockBuffer bitmap_buf;
     
     for(unsigned int attempt = 0; attempt < GROUPS_COUNT; attempt++){
@@ -932,8 +938,10 @@ uint32_t allocate_node(uint32_t preferred_bgd){
 
 
 uint32_t allocate_block(uint32_t prefered_bgd) {
+    struct BlockBuffer temp;
     struct EXT2BlockGroupDescriptorTable b_group_descriptor_table;
-    read_blocks(&b_group_descriptor_table, 3, 1); //Block 0 boot sector, 1-2 superblock, 3 bgdt
+    read_blocks(&temp, 3, 1); //Block 0 boot sector, 1-2 superblock, 3 bgdt
+    memcpy((void*)&b_group_descriptor_table, (void*)&temp, sizeof(struct EXT2BlockGroupDescriptorTable));
 
     struct BlockBuffer bitmap_buf;
 
@@ -1166,8 +1174,10 @@ void write_node_disk(struct EXT2Inode node, uint32_t inode){
     uint32_t bgd_idx = inode_to_bgd(inode);
     uint32_t index_in_group = inode_to_local(inode);
 
+    struct BlockBuffer temp;
     struct EXT2BlockGroupDescriptorTable b_group_descriptor_table;
-    read_blocks(&b_group_descriptor_table, 3, 1); // Block 0 boot sector, 1-2 superblock, 3 bgdt
+    read_blocks(&temp, 3, 1); // Block 0 boot sector, 1-2 superblock, 3 bgdt
+    memcpy((void*)&b_group_descriptor_table, (void*)&temp, sizeof(struct EXT2BlockGroupDescriptorTable));
 
     struct EXT2BlockGroupDescriptor *bgd = &b_group_descriptor_table.table[bgd_idx];
     uint32_t inode_table_block = bgd->bg_inode_table;
@@ -1175,10 +1185,13 @@ void write_node_disk(struct EXT2Inode node, uint32_t inode){
     uint32_t inode_block_offset = index_in_group / INODES_PER_TABLE;
     uint32_t inode_offset_within_block = index_in_group % INODES_PER_TABLE;
 
+    memset((void*)&temp, 0, BLOCK_SIZE);
     struct EXT2Inode inode_buf[INODES_PER_TABLE];
-    read_blocks(&inode_buf, inode_table_block + inode_block_offset, 1);
+    read_blocks(&temp, inode_table_block + inode_block_offset, 1);
+    memcpy((void*)&inode_buf, (void*)&temp, sizeof(struct EXT2Inode)*INODES_PER_TABLE);
     inode_buf[inode_offset_within_block] = node;
-    write_blocks(&inode_buf, inode_table_block + inode_block_offset, 1);
+    memcpy((void*)&temp, (void*)&inode_buf, sizeof(struct EXT2Inode)*INODES_PER_TABLE);
+    write_blocks(&temp, inode_table_block + inode_block_offset, 1);
 }
 
 int8_t delete(struct EXT2DriverRequest request){
@@ -1314,7 +1327,9 @@ int8_t write(struct EXT2DriverRequest request){
         init_directory_table(&inode,inode_num,request.parent_inode);
         /*Update block group descriptor (specifically for bg_used_dirs_count)*/
         struct EXT2BlockGroupDescriptorTable b_group_descriptor_table;
-        read_blocks(&b_group_descriptor_table, 3, 1); //Block 0 boot sector, 1-2 superblock, 3 bgdt
+        struct BlockBuffer temp;
+        read_blocks(&temp, 3, 1); //Block 0 boot sector, 1-2 superblock, 3 bgdt
+        memcpy((void*)&b_group_descriptor_table, (void*)&temp, sizeof(struct EXT2BlockGroupDescriptorTable));
         struct EXT2BlockGroupDescriptor *bgd = &b_group_descriptor_table.table[inode_to_bgd(inode_num)];
         bgd->bg_used_dirs_count+=1;
 
