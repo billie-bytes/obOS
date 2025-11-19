@@ -1,4 +1,5 @@
 #include "header/cpu/gdt.h"
+#include "header/cpu/interrupt.h"
 
 /**
  * global_descriptor_table, predefined GDT.
@@ -62,7 +63,69 @@ struct GlobalDescriptorTable global_descriptor_table = {
             .granularity_bit = 1,
 
             .base_high = 0
-        }
+        },
+        {
+            /* User   Code Descriptor */
+            .segment_low = 0xFFFF,
+            .base_low = 0,
+
+            .base_mid = 0,
+            .type_bit = 0xA,
+            .non_system = 1,
+            .privilege_bit = 0x3,
+            .present_bit = 1,
+
+            .limit_bit = 0xF,
+
+            .available_bit = 0,
+            .long_bit = 0,
+            .default_operation_bit = 1,
+            .granularity_bit = 1,
+
+            .base_high = 0
+
+        },
+        {
+            /* User   Data Descriptor */
+            .segment_low = 0xFFFF,
+            .base_low = 0x0,
+
+            .base_mid = 0,
+            .type_bit = 0x2,
+            .non_system = 1,            // S
+            .privilege_bit = 0x3,       // DPL
+            .present_bit = 1,           // P
+
+            .limit_bit = 0xF,
+
+            .available_bit = 0,         //
+            .long_bit = 0,              // L
+            .default_operation_bit = 1, // D/B
+            .granularity_bit = 1,       // G
+
+            .base_high = 0
+
+        },
+        {
+            /* TSS Descriptor */
+            .segment_low                  = sizeof(struct TSSEntry),
+            .base_low                     = 0,
+            
+            .base_mid                     = 0,
+            .type_bit                     = 0x9,
+            .non_system                   = 0,    // S bit
+            .privilege_bit                = 0,    // DPL
+            .present_bit                  = 1,    // P bit
+
+            .limit_bit                    = (sizeof(struct TSSEntry) & (0xF << 16)) >> 16,
+            
+            .default_operation_bit        = 1,    // D/B bit
+            .long_bit                     = 0,    // L bit
+            .granularity_bit              = 0,    // G bit
+
+            .base_high                    = 0,
+        },
+        {0}
     }
 };
 
@@ -75,3 +138,11 @@ struct GDTR _gdt_gdtr = {
     .size = sizeof(struct GlobalDescriptorTable) - 1,
     .address = &(global_descriptor_table)
 };
+
+void gdt_install_tss(void) {
+    uint32_t base = (uint32_t) &_interrupt_tss_entry;
+    global_descriptor_table.table[5].base_high = (base & (0xFF << 24)) >> 24;
+    global_descriptor_table.table[5].base_mid  = (base & (0xFF << 16)) >> 16;
+    global_descriptor_table.table[5].base_low  = base & 0xFFFF;
+}
+

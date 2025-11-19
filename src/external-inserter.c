@@ -70,7 +70,7 @@ int main(int argc, char *argv[]) {
     request.buffer_size = filesize;
     request.name = name;
     request.name_len = filename_length;
-    request.is_directory = FALSE;
+    request.is_folder = false;
     sscanf(argv[2], "%u", &request.parent_inode);
     sscanf(argv[1], "%s", request.name);
 
@@ -79,13 +79,13 @@ int main(int argc, char *argv[]) {
     int retcode = read(reqread);
     if (retcode == 0)
     {
-        bool same = TRUE;
+        bool same = true;
         for (uint32_t i = 0; i < filesize; i++)
         {
             if (read_buffer[i] != file_buffer[i])
             {
                 printf("not same\n");
-                same = FALSE;
+                same = false;
                 break;
             }
         }

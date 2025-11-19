@@ -55,6 +55,7 @@ struct EXT2DriverRequest
     bool is_folder; 
 }__attribute__((packed));
 
+
 /**
  * EXT2Superblock: 
  * - https://www.nongnu.org/ext2-doc/ext2.html#superblock
@@ -211,7 +212,7 @@ struct EXT2DirectoryEntry
      * 8bit unsigned value used to indicate file type.
      */
     uint8_t file_type;
-    char* name;
+    char name[255];
 
 }__attribute__((packed));
 
@@ -233,11 +234,13 @@ bool bitmapget(struct BlockBuffer* bitmap, uint32_t offset);
 char *get_entry_name(void *entry);
 
 /**
- * get the directory entry from the buffer
- * @param node the node of the directory
- * @return the directory entry
+ * @param parent_node the node of the parent (object form)
+ * @param name name of the file/folder entry
+ * @param file_type the file type (file or directory) of the entry that is searched
+ * @param entry an empty entry that is going to be filled with the found entry
+ * @return the logical address for the block that contains the entry
  */
-struct EXT2DirectoryEntry get_directory_entry(struct EXT2Inode parent_node, char* name);
+uint32_t get_directory_entry(struct EXT2Inode parent_node, char* name, uint8_t file_type, struct EXT2DirectoryEntry* entry);
 
 /**
  * get the next directory entry from the current entry
@@ -367,7 +370,7 @@ uint32_t allocate_block(uint32_t prefered_bgd);
  * also all of the blocks of indirect blocks if necessary
  * @param inode that needs to be deallocated
  */
-void deallocate_node(uint32_t inode);
+uint32_t deallocate_node(uint32_t inode);
 
 /**
  * @brief deallocate node blocks
@@ -378,15 +381,10 @@ void deallocate_blocks(void *loc, uint32_t blocks);
 
 /**
  * @brief deallocate block from the disk
- * @param locations block locations
- * @param blocks number of blocks
- * @param bitmap block bitmap
- * @param depth depth of the block
- * @param last_bgd last bgd that is used
- * @param bgd_loaded whether bgd is loaded or not
+ * @param block_logical_address block locations
  * @return new last bgd
  */
-uint32_t deallocate_block(uint32_t *locations, uint32_t blocks, struct BlockBuffer *bitmap, uint32_t depth, uint32_t *last_bgd, bool bgd_loaded);
+uint32_t deallocate_block(uint32_t block_logical_address);
 
 /**
  * @brief write node->block in the given node, will allocate
