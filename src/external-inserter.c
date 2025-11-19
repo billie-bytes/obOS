@@ -108,7 +108,7 @@ int main(int argc, char *argv[]) {
     retcode = write(request);
     if (retcode == 1 && is_replace)
     {
-        // retcode = delete(request);
+        retcode = delete(request);
         retcode = write(request);
     }
     if (retcode == 0)

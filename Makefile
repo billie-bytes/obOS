@@ -74,7 +74,7 @@ disk:
 
 inserter:
 	@$(CC) -Wno-builtin-declaration-mismatch -g -I$(SOURCE_FOLDER) \
-		$(SOURCE_FOLDER)/stdlib/string.c \
+		$(SOURCE_FOLDER)/string.c \
 		$(SOURCE_FOLDER)/ext2.c \
 		$(SOURCE_FOLDER)/external-inserter.c \
 		-o $(OUTPUT_FOLDER)/inserter

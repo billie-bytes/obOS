@@ -366,8 +366,8 @@ static void initialize_block_groups(){
         initialize_bitmap(i,&block_bitmap,&inode_bitmap);
         write_blocks(&block_bitmap, b_group_descriptor_table.table[i].bg_block_bitmap,1); //write block bitmap
         write_blocks(&inode_bitmap, b_group_descriptor_table.table[i].bg_inode_bitmap,1); //write inode bitmap
-        for(uint32_t i = 0; i<16; i++){ //zero out inode table
-            write_blocks(&empty_block, b_group_descriptor_table.table[i].bg_inode_table+i,1);
+        for(uint32_t j = 0; j<16; j++){ //zero out inode table
+            write_blocks(&empty_block, b_group_descriptor_table.table[i].bg_inode_table+j,1);
         }
 
         if(i==0){
@@ -380,7 +380,7 @@ static void initialize_block_groups(){
 void initialize_filesystem_ext2(){
     if(is_empty_storage()){
         create_ext2();
-        initialize_block_groups(&b_group_descriptor_table);
+        initialize_block_groups();
     }
 }
 
