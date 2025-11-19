@@ -68,9 +68,9 @@ uint32_t writeInodeToBlock(struct BlockBuffer* block, struct EXT2Inode inode, ui
  * @brief Takes an inode number and puts the content of that inode from disk into the logical inode
  * @param inode_num The inode number that is
  */
-uint32_t read_inode(uint32_t inode_num, struct EXT2Inode* inode){
+int8_t read_inode(uint32_t inode_num, struct EXT2Inode* inode){
     if(inode_num>INODES_COUNT){
-        return 0;
+        return -1;
     }
     uint32_t block_group_index = inode_to_bgd(inode_num);
     uint32_t inode_idx_in_group = inode_to_local(inode_num); //idx of inode relative to the bgd
@@ -78,7 +78,9 @@ uint32_t read_inode(uint32_t inode_num, struct EXT2Inode* inode){
     uint32_t inode_idx_in_block = inode_idx_in_group%INODES_PER_TABLE;
 
     struct EXT2BlockGroupDescriptorTable gdt;
-    read_blocks(&gdt, 3, 1);
+    struct BlockBuffer temp;
+    read_blocks(&temp, 3, 1);
+    gdt = *(struct EXT2BlockGroupDescriptorTable*)&temp;
     struct EXT2BlockGroupDescriptor descriptor = gdt.table[block_group_index];
     uint32_t inode_table_start = descriptor.bg_inode_table;
     uint32_t inode_block_idx = inode_table_start + block_idx_in_table;
@@ -320,7 +322,7 @@ static void initialize_block_groups(){
     for(int i = 1; i < 15; i++){
         root_inode.i_block[i] = 0;
     }
-    writeInodeToBlock(&root_inode_block,root_inode,0);
+    memcpy((void*)&root_inode_block.buf[sizeof(struct EXT2Inode)],(void*)&root_inode,sizeof(struct EXT2Inode)); //at offset 70 because inode 1 is not used
     struct EXT2DirectoryEntry root_directory_entry;
     struct EXT2DirectoryEntry root_parent_directory_entry;
     struct BlockBuffer root_directory_block;
@@ -366,8 +368,8 @@ static void initialize_block_groups(){
         initialize_bitmap(i,&block_bitmap,&inode_bitmap);
         write_blocks(&block_bitmap, b_group_descriptor_table.table[i].bg_block_bitmap,1); //write block bitmap
         write_blocks(&inode_bitmap, b_group_descriptor_table.table[i].bg_inode_bitmap,1); //write inode bitmap
-        for(uint32_t i = 0; i<16; i++){ //zero out inode table
-            write_blocks(&empty_block, b_group_descriptor_table.table[i].bg_inode_table+i,1);
+        for(uint32_t j = 0; j<16; j++){ //zero out inode table
+            write_blocks(&empty_block, b_group_descriptor_table.table[i].bg_inode_table+j,1);
         }
 
         if(i==0){
@@ -380,7 +382,7 @@ static void initialize_block_groups(){
 void initialize_filesystem_ext2(){
     if(is_empty_storage()){
         create_ext2();
-        initialize_block_groups(&b_group_descriptor_table);
+        initialize_block_groups();
     }
 }
 
@@ -1657,4 +1659,3 @@ int8_t read_directory(struct EXT2DriverRequest *prequest){
 
     return 0; //success
 }
-
