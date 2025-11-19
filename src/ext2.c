@@ -68,9 +68,9 @@ uint32_t writeInodeToBlock(struct BlockBuffer* block, struct EXT2Inode inode, ui
  * @brief Takes an inode number and puts the content of that inode from disk into the logical inode
  * @param inode_num The inode number that is
  */
-uint32_t read_inode(uint32_t inode_num, struct EXT2Inode* inode){
+int8_t read_inode(uint32_t inode_num, struct EXT2Inode* inode){
     if(inode_num>INODES_COUNT){
-        return 0;
+        return -1;
     }
     uint32_t block_group_index = inode_to_bgd(inode_num);
     uint32_t inode_idx_in_group = inode_to_local(inode_num); //idx of inode relative to the bgd
@@ -78,7 +78,9 @@ uint32_t read_inode(uint32_t inode_num, struct EXT2Inode* inode){
     uint32_t inode_idx_in_block = inode_idx_in_group%INODES_PER_TABLE;
 
     struct EXT2BlockGroupDescriptorTable gdt;
-    read_blocks(&gdt, 3, 1);
+    struct BlockBuffer temp;
+    read_blocks(&temp, 3, 1);
+    gdt = *(struct EXT2BlockGroupDescriptorTable*)&temp;
     struct EXT2BlockGroupDescriptor descriptor = gdt.table[block_group_index];
     uint32_t inode_table_start = descriptor.bg_inode_table;
     uint32_t inode_block_idx = inode_table_start + block_idx_in_table;
@@ -320,7 +322,7 @@ static void initialize_block_groups(){
     for(int i = 1; i < 15; i++){
         root_inode.i_block[i] = 0;
     }
-    writeInodeToBlock(&root_inode_block,root_inode,0);
+    memcpy((void*)&root_inode_block.buf[sizeof(struct EXT2Inode)],(void*)&root_inode,sizeof(struct EXT2Inode)); //at offset 70 because inode 1 is not used
     struct EXT2DirectoryEntry root_directory_entry;
     struct EXT2DirectoryEntry root_parent_directory_entry;
     struct BlockBuffer root_directory_block;
@@ -1657,4 +1659,3 @@ int8_t read_directory(struct EXT2DriverRequest *prequest){
 
     return 0; //success
 }
-
