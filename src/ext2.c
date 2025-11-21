@@ -1103,7 +1103,7 @@ uint32_t deallocate_node(uint32_t inode){
 
 
 
-void allocate_node_blocks(void *ptr, struct EXT2Inode node, uint32_t prefered_bgd){
+void allocate_node_blocks(void *ptr, struct EXT2Inode *node, uint32_t prefered_bgd){
     /*
     I.S 
     buffer pointed by ptr is already filled with data that is intended to be written.
@@ -1116,20 +1116,20 @@ void allocate_node_blocks(void *ptr, struct EXT2Inode node, uint32_t prefered_bg
     array
     
     */
-    uint32_t total_blocks = (node.i_size + BLOCK_SIZE - 1) / BLOCK_SIZE; // calculate total blocks needed
+    uint32_t total_blocks = (node->i_size + BLOCK_SIZE - 1) / BLOCK_SIZE; // calculate total blocks needed
     uint8_t *data_ptr = (uint8_t *)ptr;
     uint32_t blocks_allocated = 0;
 
     // Writes data in the direct blocks
     for (int i = 0; i < 12 && blocks_allocated < total_blocks; i++) {
-        node.i_block[i] = allocate_block(prefered_bgd);
-        write_blocks(data_ptr + (blocks_allocated * BLOCK_SIZE), node.i_block[i], 1);
+        node->i_block[i] = allocate_block(prefered_bgd);
+        write_blocks(data_ptr + (blocks_allocated * BLOCK_SIZE), node->i_block[i], 1);
         blocks_allocated++;
     }
 
     // Writes data in single indirect blocks (if needed)
     if (blocks_allocated < total_blocks) {
-        node.i_block[12] = allocate_block(prefered_bgd);
+        node->i_block[12] = allocate_block(prefered_bgd);
         uint32_t indirect_block_data[BLOCK_SIZE / sizeof(uint32_t)];
         memset(indirect_block_data,0,BLOCK_SIZE);
 
@@ -1138,12 +1138,12 @@ void allocate_node_blocks(void *ptr, struct EXT2Inode node, uint32_t prefered_bg
             write_blocks(data_ptr + (blocks_allocated * BLOCK_SIZE), indirect_block_data[i], 1);
             blocks_allocated++;
         }
-        write_blocks(indirect_block_data, node.i_block[12], 1);
+        write_blocks(indirect_block_data, node->i_block[12], 1);
     }
 
     // Writes data in double indirect blocks (if needed)
     if (blocks_allocated < total_blocks) {
-        node.i_block[13] = allocate_block(prefered_bgd);
+        node->i_block[13] = allocate_block(prefered_bgd);
 
         uint32_t double_indirect_data[BLOCK_SIZE / sizeof(uint32_t)];
         memset(double_indirect_data, 0, BLOCK_SIZE);
@@ -1159,7 +1159,7 @@ void allocate_node_blocks(void *ptr, struct EXT2Inode node, uint32_t prefered_bg
             }
             write_blocks(single_indirect_data, double_indirect_data[i], 1);
         }
-        write_blocks(double_indirect_data, node.i_block[13], 1);
+        write_blocks(double_indirect_data, node->i_block[13], 1);
     }
 }
 
@@ -1342,7 +1342,7 @@ int8_t write(struct EXT2DriverRequest request){
         inode.i_mode = EXT2_S_IFREG;
         inode.i_size = request.buffer_size;
         inode.i_blocks = (request.buffer_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        allocate_node_blocks(request.buf, inode, parent_group);
+        allocate_node_blocks(request.buf, &inode, parent_group);
     }
     add_entry_to_dir(request.parent_inode,current_entry);
     write_node_disk(inode, inode_num);

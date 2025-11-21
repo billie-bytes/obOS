@@ -1,4 +1,8 @@
 {
     "debug.onTaskErrors": "debugAnyway",
     "C_Cpp.dimInactiveRegions": false,
+    "files.associations": {
+        "stdbool.h": "c",
+        "disk.h": "c"
+    },
 }

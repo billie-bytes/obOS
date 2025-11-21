@@ -58,4 +58,12 @@ int strcmp(const char *s1, const char *s2);
 int strncmp(const char *s1, const char *s2, size_t n);
 size_t strlen(const char *str);
 
+/**
+ * C standard strlen, calculates the length of a null-terminated string
+ * 
+ * @param str Pointer to null-terminated string
+ * @return Length of the string (excluding null terminator)
+ */
+size_t strlen(const char *str);
+
 #endif
