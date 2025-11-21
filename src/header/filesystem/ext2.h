@@ -396,7 +396,7 @@ uint32_t deallocate_block(uint32_t block_logical_address);
  * 
  * @attention only implement until doubly indirect block, if you want to implement triply indirect block please increase the storage size to at least 256MB
  */
-void allocate_node_blocks(void *ptr, struct EXT2Inode node, uint32_t prefered_bgd);
+void allocate_node_blocks(void *ptr, struct EXT2Inode *node, uint32_t prefered_bgd);
 
 /**
  * @brief update the node to the disk

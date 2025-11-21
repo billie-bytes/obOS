@@ -10,6 +10,8 @@ struct TSSEntry _interrupt_tss_entry = {
     .ss0  = GDT_KERNEL_DATA_SEGMENT_SELECTOR,
 };
 
+static void syscall(struct InterruptFrame frame);
+
 void io_wait(void) {
     out(0x80, 0);
 }
@@ -46,6 +48,9 @@ void pic_remap(void) {
 
 void main_interrupt_handler(struct InterruptFrame frame) {
     switch (frame.int_number) {
+        case 0x30:
+            syscall(frame);
+            break;
         case (PIC1_OFFSET + IRQ_KEYBOARD):
             keyboard_isr();
             break;
@@ -70,27 +75,35 @@ void syscall(struct InterruptFrame frame) {
     switch (frame.cpu.general.eax) {
         case 0:
         /* read() */
-            *((int8_t*) frame.cpu.general.ecx) = read(
-                *(struct EXT2DriverRequest*) frame.cpu.general.ebx
-            );
+            if (frame.cpu.general.ecx) {
+                *((int8_t*) frame.cpu.general.ecx) = read(
+                    *(struct EXT2DriverRequest*) frame.cpu.general.ebx
+                );
+            }
             break;
         case 1:
         /* read_directory() */
-            *((int8_t*) frame.cpu.general.ecx) = read_directory(
-                (struct EXT2DriverRequest*) frame.cpu.general.ebx
-            );
+            if (frame.cpu.general.ecx) {
+                *((int8_t*) frame.cpu.general.ecx) = read_directory(
+                    (struct EXT2DriverRequest*) frame.cpu.general.ebx
+                );
+            }
             break;
         case 2:
         /* write() */
-            *((int8_t*) frame.cpu.general.ecx) = write(
-                *(struct EXT2DriverRequest*) frame.cpu.general.ebx
-            );
+            if (frame.cpu.general.ecx) {
+                *((int8_t*) frame.cpu.general.ecx) = write(
+                    *(struct EXT2DriverRequest*) frame.cpu.general.ebx
+                );
+            }
             break;
         case 3:
         /* delete() */
-            *((int8_t*) frame.cpu.general.ecx) = delete(
-                *(struct EXT2DriverRequest*) frame.cpu.general.ebx
-            );
+            if (frame.cpu.general.ecx) {
+                *((int8_t*) frame.cpu.general.ecx) = delete(
+                    *(struct EXT2DriverRequest*) frame.cpu.general.ebx
+                );
+            }
             break;
         case 4:
         /* Keyboard I/O getchar() */
@@ -99,17 +112,21 @@ void syscall(struct InterruptFrame frame) {
         case 5:
         /* putchar() */
             putchar(
-                frame.cpu.general.ebx,
-                frame.cpu.general.ecx
+                (char)(frame.cpu.general.ebx & 0xFF),
+                (uint8_t)(frame.cpu.general.ecx & 0x0F)
             );
             break;
         case 6:
         /* puts() */
-            puts(
-                (char*) frame.cpu.general.ebx, 
-                frame.cpu.general.ecx, 
-                frame.cpu.general.edx
-            ); // Assuming puts() exist in kernel
+            if (frame.cpu.general.ebx) {
+                uint32_t cnt = frame.cpu.general.ecx;
+                if (cnt > 2000) cnt = 2000; /* basic clamp */
+                puts(
+                    (char*) frame.cpu.general.ebx, 
+                    cnt, 
+                    (uint8_t)(frame.cpu.general.edx & 0x0F)
+                );
+            }
             break;
         case 7: 
             keyboard_state_activate();

@@ -16,6 +16,8 @@ void initialize_idt(void) {
     for (uint16_t i = 0; i < 64; i++){
         set_interrupt_gate( (uint8_t) i, isr_stub_table[i], GDT_KERNEL_CODE_SEGMENT_SELECTOR, 0);
     }
+    // Allow user mode to invoke syscall via int 0x30 (DPL=3)
+    set_interrupt_gate(0x30, isr_stub_table[0x30], GDT_KERNEL_CODE_SEGMENT_SELECTOR, 3);
     /* 
      * TODO: 
      * Iterate all isr_stub_table,

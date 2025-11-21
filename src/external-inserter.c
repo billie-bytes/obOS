@@ -11,7 +11,7 @@
 uint8_t *image_storage;
 uint8_t *file_buffer;
 /* Read Buffer: 4MB */
-uint8_t read_buffer[4*1024*1024]; 
+uint8_t *read_buffer; 
 
 void read_blocks(void *ptr, uint32_t logical_block_address, uint8_t block_count) {
     for (int i = 0; i < block_count; i++) {
@@ -47,6 +47,7 @@ int main(int argc, char *argv[]) {
     // Read storage into memory, requiring 4 MB memory
     image_storage = malloc(4*1024*1024);
     file_buffer   = malloc(4*1024*1024);
+    read_buffer   = malloc(4*1024*1024);
     FILE *fptr    = fopen(argv[3], "r");
     fread(image_storage, 4*1024*1024, 1, fptr);
     fclose(fptr);

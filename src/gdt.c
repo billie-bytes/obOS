@@ -119,8 +119,9 @@ struct GlobalDescriptorTable global_descriptor_table = {
 
             .limit_bit                    = (sizeof(struct TSSEntry) & (0xF << 16)) >> 16,
             
-            .default_operation_bit        = 1,    // D/B bit
+            .available_bit                = 0,    // AVL bit
             .long_bit                     = 0,    // L bit
+            .default_operation_bit        = 1,    // D/B bit
             .granularity_bit              = 0,    // G bit
 
             .base_high                    = 0,
