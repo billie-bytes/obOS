@@ -46,9 +46,9 @@ static uint32_t read32fromBlock(struct BlockBuffer block, uint16_t offset){
     }
     uint32_t value = 0;
     value = value | (uint32_t)block.buf[offset];
-    value = value | (uint32_t)block.buf[offset]<<8;
-    value = value | (uint32_t)block.buf[offset]<<16;
-    value = value | (uint32_t)block.buf[offset]<<24;
+    value = value | (uint32_t)block.buf[offset + 1]<<8;
+    value = value | (uint32_t)block.buf[offset + 2]<<16;
+    value = value | (uint32_t)block.buf[offset + 3]<<24;
     return value;
 }
 

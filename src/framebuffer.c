@@ -40,6 +40,14 @@ void putchar(char c, uint8_t color) {
     if (c == '\n') {
         cursor_row++;
         cursor_col = 0;
+    } else if (c == '\b' || c == 127) {
+        // Backspace: move cursor back one position
+        if (cursor_col > 0) {
+            cursor_col--;
+        } else if (cursor_row > 0) {
+            cursor_row--;
+            cursor_col = 79;
+        }
     } else {
         framebuffer_write(cursor_row, cursor_col, c, fg, bg);
         cursor_col++;

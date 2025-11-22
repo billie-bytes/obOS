@@ -143,3 +143,86 @@ size_t strlen(const char *str) {
     }
     return len;
 }
+
+char* strcpy(char *dest, const char *src) {
+    char *d = dest;
+    while ((*d++ = *src++) != '\0') { /* copy including '\0' */ }
+    return dest;
+}
+
+char* strncpy(char *dest, const char *src, size_t n) {
+    size_t i = 0;
+    for (; i < n && src[i] != '\0'; i++) dest[i] = src[i];
+    for (; i < n; i++) dest[i] = '\0';
+    return dest;
+}
+
+char* strcat(char *dest, const char *src) {
+    char *d = dest;
+    while (*d) d++;                  /* move to end of dest */
+    while ((*d++ = *src++) != '\0') {/* append including '\0' */}
+    return dest;
+}
+
+char* strncat(char *dest, const char *src, size_t n) {
+    char *d = dest;
+    while (*d) d++;                  /* move to end of dest */
+    if (n == 0) { *d = '\0'; return dest; }
+    while (*src && n-- > 0) *d++ = *src++;
+    *d = '\0';
+    return dest;
+}
+
+char* strchr(const char *s, int c) {
+    char ch = (char)c;
+    while (*s) {
+        if (*s == ch) return (char*)s;
+        s++;
+    }
+    return (ch == '\0') ? (char*)s : NULL;
+}
+
+char* strrchr(const char *s, int c) {
+    const char *last = NULL;
+    char ch = (char)c;
+    while (*s) {
+        if (*s == ch) last = s;
+        s++;
+    }
+    if (ch == '\0') return (char*)s;
+    return (char*)last;
+}
+
+/* Simple delimiter test helper for strtok */
+static int _is_delim(char x, const char *delim) {
+    while (*delim) {
+        if (x == *delim) return 1;
+        delim++;
+    }
+    return 0;
+}
+
+/* Minimal strtok (not reentrant). Behaves like POSIX strtok for simple use. */
+char* strtok(char *s, const char *delim) {
+    static char *save;
+    char *start;
+
+    if (s) save = s;
+    if (!save) return NULL;
+
+    /* Skip leading delimiters */
+    while (*save && _is_delim(*save, delim)) save++;
+    if (*save == '\0') { save = NULL; return NULL; }
+
+    start = save;
+    while (*save && !_is_delim(*save, delim)) save++;
+
+    if (*save) {
+        *save = '\0';
+        save++;
+    } else {
+        /* reached end of string */
+        save = NULL;
+    }
+    return start;
+}
