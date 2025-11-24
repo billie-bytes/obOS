@@ -2,6 +2,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "header/memory/paging.h"
+#include "header/stdlib/string.h"
+#include "header/process/process.h"
 
 __attribute__((aligned(0x1000))) struct PageDirectory _paging_kernel_page_directory = {
     .table = {
@@ -133,16 +135,23 @@ struct PageDirectory* paging_create_new_page_directory(void) {
      * - Set page_directory.table[0x300] with kernel page directory entry
      * - Return the page directory address
      */ 
-    for(int i = 0; i < PAGING_DIRECTORY_TABLE_MAX_COUNT; i++){
-        if(page_directory_manager.page_directory_used[i] == 0){
-            struct PageDirectory *new_page_dir = &page_directory_list[i];
-            paging_free_page_directory(new_page_dir);
+    for(uint32_t i=0; i<PAGING_DIRECTORY_TABLE_MAX_COUNT; i++){
+        if(!page_directory_manager.page_directory_used[i]){
+
             page_directory_manager.page_directory_used[i] = true;
-            new_page_dir->table[0x300].flag.present_bit = 1;
-            new_page_dir->table[0x300].flag.write_bit = 1;
-            new_page_dir->table[0x300].flag.use_pagesize_4_mb = 1;
-            new_page_dir->table[0x300].lower_address = 0;
-            return &page_directory_list[i];
+
+            struct PageDirectory* new_directory = &page_directory_list[i];
+
+            struct PageDirectoryEntry new_entry = {
+                .flag.present_bit       = 1,
+                .flag.write_bit         = 1,
+                .flag.use_pagesize_4_mb = 1,
+                .lower_address          = 0,
+            };
+
+            new_directory->table[0x300] = new_entry;
+
+            return new_directory;
         }
     }
     return NULL;

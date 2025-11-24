@@ -142,7 +142,6 @@ bool paging_allocate_user_page_frame(struct PageDirectory *page_dir, void *virtu
  */
 bool paging_free_user_page_frame(struct PageDirectory *page_dir, void *virtual_addr);
 
-
 /* --- Process-related Memory Management --- */
 #define PAGING_DIRECTORY_TABLE_MAX_COUNT 32
 
