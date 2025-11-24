@@ -5,13 +5,16 @@
 #define BLOCK_GROUP_INITIAL_USED 21 //2 (superblock) + 1 (directory table) + 1 (block bitmap) + 1 (inode bitmap) + 16 (inode table)
 #define DIR_SIZE 9 //directory size without name
 const uint8_t fs_signature[BLOCK_SIZE] = {
-    'I', 'T', 'B', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',  ' ',
-    'S', 't', 'u', 'd', 'e', 'n', 't', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',  ' ',
-    'O', 'r', 'c', 'h', 'e', 's', 't', 'r', 'a', ' ', ' ', ' ', ' ', ' ', ' ',  ' ',
-    'M', 'a', 'd', 'e', ' ', 'w', 'i', 't', 'h', ' ', 'j', 'O', 'S', 'h', '<',  '3',
-    '-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '-', '2', '0', '2', '5', '\n',
-    [BLOCK_SIZE-2] = 'O',
-    [BLOCK_SIZE-1] = 'k',
+"J-JJos?! I-Is that m-my beautiful g-glorious king Joshy!? "
+"Omg omg omg.. Oh i-it's all over the screen.. "
+"Oh Josh.. Josh Josh.. What beautiful name you have... "
+"H-His eyes, looking at his beautiful eyes, h-he makes my heart... "
+"Oh words cannot express my feelings for Josh.. "
+"Oh Josh, your beautiful, precious, soft, short, hair.. "
+"H-His smile, his bravery... It's... It's all perfect. "
+"Argh just by.. seeing him makes me want to burst! "
+"Ohh Josh I started Maimai all because of him... "
+"Oh Josh, Josh Josh! I. NEED. Him.!"
 };
 
 uint32_t write16toBlock(uint16_t value, struct BlockBuffer* block, uint16_t offset){
