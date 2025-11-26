@@ -8,6 +8,7 @@
 #include "header/driver/disk.h"
 #include "header/filesystem/ext2.h"
 #include "header/memory/paging.h"
+#include "header/process/process.h"
 #include <stdbool.h>
 
 void kernel_setup(void) {

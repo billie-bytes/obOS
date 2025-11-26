@@ -45,8 +45,63 @@
 #define PROCESS_CREATE_FAIL_NOT_ENOUGH_MEMORY    3
 #define PROCESS_CREATE_FAIL_FS_READ_FAILURE      4
 
+/**
+ * Contain information needed for task to be able to get interrupted and resumed later
+ *
+ * @param cpu                         All CPU register state
+ * @param eip                         CPU instruction counter to resume execution
+ * @param eflags                      Flag register to load before resuming the execution
+ * @param page_directory_virtual_addr CPU register CR3, containing pointer to active page directory
+ */
 
+struct Context {
+    // TODO: Add important field here
+    struct CPURegister cpu;
+    uint32_t eip;
+    uint32_t cs;
+    uint32_t eflags;
+    uint32_t esp;
+    uint32_t ss;
+    struct PageDirectory *page_directory_virtual_addr;
+};
 
+typedef enum PROCESS_STATE {
+    // TODO: Add process states
+    PROCESS_READY,
+    PROCESS_RUNNING,
+    PROCESS_TERMINATED
+} PROCESS_STATE;
+
+/**
+ * Structure data containing information about a process
+ *
+ * @param metadata Process metadata, contain various information about process
+ * @param context  Process context used for context saving & switching
+ * @param memory   Memory used for the process
+ */
+struct ProcessControlBlock {
+    struct {
+        uint32_t pid;
+        enum PROCESS_STATE state;
+        char name[10];
+    } metadata;
+
+    struct Context context;
+
+    struct {
+        void     *virtual_addr_used[PROCESS_PAGE_FRAME_COUNT_MAX];
+        uint32_t page_frame_used_count;
+    } memory;
+};
+
+extern struct ProcessControlBlock _process_list[PROCESS_COUNT_MAX];
+
+struct ProcessManagerState {
+    bool _process_used[PROCESS_COUNT_MAX];
+    uint32_t active_process_count;
+};
+
+extern struct ProcessManagerState process_manager_state;
 
 
 /**
@@ -66,12 +121,10 @@ struct ProcessControlBlock* process_get_current_running_pcb_pointer(void);
  */
 int32_t process_create_user_process(struct EXT2DriverRequest request);
 
-/**
- * Destroy process then release page directory and process control block
- * 
- * @param pid Process ID to delete
- * @return    True if process destruction success
- */
-bool process_destroy(uint32_t pid);
+uint32_t process_list_get_inactive_index();
+
+uint32_t ceil_div(uint32_t a, uint32_t b);
+
+uint32_t process_generate_new_pid();
 
 #endif
