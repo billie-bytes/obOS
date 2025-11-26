@@ -56,12 +56,12 @@
 
 struct Context {
     // TODO: Add important field here
-    struct CPURegister cpu;
-    uint32_t eip;
-    uint32_t cs;
-    uint32_t eflags;
-    uint32_t esp;
-    uint32_t ss;
+    struct CPURegister cpu; /* 0x30 */
+    uint32_t eip;           /* 0x30 -- 0x34 */
+    uint32_t cs;            /* 0x34 -- 0x38 */
+    uint32_t eflags;        /* 0x38 -- 0x3C */
+    uint32_t esp;           /* 0x3C -- 0x40 */
+    uint32_t ss;            /* 0x40 -- 0x44 */
     struct PageDirectory *page_directory_virtual_addr;
 };
 

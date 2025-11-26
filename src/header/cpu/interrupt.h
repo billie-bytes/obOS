@@ -82,6 +82,7 @@ struct CPURegister {
 		uint32_t fs;        // 36
 		uint32_t es;        // 40
 		uint32_t ds;        // 44
+		/* Total byte: 48 or 0x30 in hex */
 	} __attribute__((packed)) segment;
 } __attribute__((packed));
 
