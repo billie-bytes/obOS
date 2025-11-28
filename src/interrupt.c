@@ -5,6 +5,7 @@
 #include "header/cpu/gdt.h"
 #include "header/filesystem/ext2.h"
 #include "header/text/framebuffer.h"
+#include "header/scheduler/scheduler.h"
 
 struct TSSEntry _interrupt_tss_entry = {
     .ss0  = GDT_KERNEL_DATA_SEGMENT_SELECTOR,
@@ -53,6 +54,9 @@ void main_interrupt_handler(struct InterruptFrame frame) {
             break;
         case (PIC1_OFFSET + IRQ_KEYBOARD):
             keyboard_isr();
+            break;
+        case (PIC1_OFFSET + IRQ_TIMER):
+            timer_isr(frame);
             break;
         default:
             break;
@@ -144,7 +148,7 @@ void activate_timer_interrupt(void) {
 
     // Activate the interrupt
     out(PIC1_DATA, in(PIC1_DATA) & ~(1 << IRQ_TIMER));
-    __asm__ volatile("sti");
+    // __asm__ volatile("sti");
 
 }
 

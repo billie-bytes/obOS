@@ -32,4 +32,6 @@ void scheduler_save_context_to_current_running_pcb(struct Context ctx);
  */
 __attribute__((noreturn)) void scheduler_switch_to_next_process(void);
 
+void timer_isr(struct InterruptFrame frame);
+
 #endif

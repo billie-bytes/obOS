@@ -53,8 +53,26 @@ __attribute__((noreturn)) void scheduler_switch_to_next_process(void){
 
     paging_use_page_directory(_process_list[current_process_idx].context.page_directory_virtual_addr);
 
-    /* Acknowledge timer IRQ using IRQ number (pic_ack expects IRQ, not vector). */
-    pic_ack(IRQ_TIMER);
-
     process_context_switch(_process_list[current_process_idx].context);
+}
+
+void timer_isr(struct InterruptFrame frame){
+
+    struct Context c = {
+        .cpu = frame.cpu,
+        .eip = frame.int_stack.eip,
+        .cs = frame.int_stack.cs,
+        .eflags = frame.int_stack.eflags,
+        /* Use inter-privilege stack values if present (when interrupt from user mode). 
+         * Fallback to saved CPU stack value otherwise. */
+        .esp = (frame.int_stack.esp_privilege_change) ? frame.int_stack.esp_privilege_change : frame.cpu.stack.esp,
+        .ss  = (frame.int_stack.ss_privilege_change) ? frame.int_stack.ss_privilege_change : (0x20 | 0x3),
+        .page_directory_virtual_addr = paging_get_current_page_directory_addr(),
+    };
+
+    scheduler_save_context_to_current_running_pcb(c);
+
+    pic_ack(IRQ_TIMER);
+    
+    scheduler_switch_to_next_process();
 }
