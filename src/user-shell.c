@@ -96,7 +96,7 @@ extern size_t strlen(const char *str);
 //     while (str[len] != '\0') len++;
 //     return len;
 // }
-extern size_t strlen(const char *str);
+
 static void print_prompt(void) {
     sys_puts("jOSh@OS-IF2230", 14, COLOR_PROMPT_USER);
     sys_puts(":", 1, COLOR_PROMPT_SEP);

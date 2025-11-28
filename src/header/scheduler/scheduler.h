@@ -37,4 +37,5 @@ void scheduler_set_skip_context_switch(bool v);
  */
 __attribute__((noreturn)) void scheduler_switch_to_next_process(void);
 
+void timer_isr(struct InterruptFrame frame);
 #endif
