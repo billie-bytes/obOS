@@ -27,6 +27,11 @@ void scheduler_init(void);
  */
 void scheduler_save_context_to_current_running_pcb(struct Context ctx);
 
+/* Runtime control: allow other modules (e.g., process manager) to toggle
+ * the diagnostic skip behavior so the scheduler can enable/disable the
+ * iret-based switch depending on active process count. */
+void scheduler_set_skip_context_switch(bool v);
+
 /**
  * Trigger the scheduler algorithm and context switch to new process
  */

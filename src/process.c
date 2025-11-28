@@ -2,6 +2,7 @@
 #include "header/memory/paging.h"
 #include "header/stdlib/string.h"
 #include "header/cpu/gdt.h"
+#include "header/scheduler/scheduler.h"
 
 struct ProcessManagerState process_manager_state = {
     .active_process_count = 0,
@@ -67,6 +68,12 @@ int32_t process_create_user_process(struct EXT2DriverRequest request) {
 
     process_manager_state._process_used[p_index] = true;
     process_manager_state.active_process_count++;
+
+    /* Notify scheduler that process count changed: disable skip-mode when
+     * more than one process exists so context-switching becomes active. */
+    if (process_manager_state.active_process_count > 1) {
+        scheduler_set_skip_context_switch(false);
+    }
 
     paging_use_page_directory(new_pd);
 

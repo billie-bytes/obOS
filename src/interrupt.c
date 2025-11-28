@@ -148,7 +148,7 @@ void activate_timer_interrupt(void) {
 
     // Activate the interrupt
     out(PIC1_DATA, in(PIC1_DATA) & ~(1 << IRQ_TIMER));
-    // __asm__ volatile("sti");
+    __asm__ volatile("sti");
 
 }
 
