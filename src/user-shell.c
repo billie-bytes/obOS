@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include "header/stdlib/string.h"
 
 #define COLOR_PROMPT_USER  0x0A
 #define COLOR_PROMPT_SEP   0x07
@@ -89,11 +90,13 @@ static inline int8_t fs_delete(struct EXT2DriverRequest* r, int8_t* rc) {
     return *rc;
 }
 
-size_t strlen(const char *str) {
-    size_t len = 0;
-    while (str[len] != '\0') len++;
-    return len;
-}
+extern size_t strlen(const char *str);
+// size_t strlen(const char *str) {
+//     size_t len = 0;
+//     while (str[len] != '\0') len++;
+//     return len;
+// }
+extern size_t strlen(const char *str);
 static void print_prompt(void) {
     sys_puts("jOSh@OS-IF2230", 14, COLOR_PROMPT_USER);
     sys_puts(":", 1, COLOR_PROMPT_SEP);
@@ -102,95 +105,105 @@ static void print_prompt(void) {
 }
 
 
-int strcmp(const char *s1, const char *s2) {
-    while (*s1 && *s2 && *s1 == *s2) {
-        s1++;
-        s2++;
-    }
-    return (unsigned char)*s1 - (unsigned char)*s2;
-}
+// int strcmp(const char *s1, const char *s2) {
+//     while (*s1 && *s2 && *s1 == *s2) {
+//         s1++;
+//         s2++;
+//     }
+//     return (unsigned char)*s1 - (unsigned char)*s2;
+// }
+extern int strcmp(const char *s1, const char *s2);
 
-int strncmp(const char *s1, const char *s2, size_t n) {
-    for (size_t i = 0; i < n; i++) {
-        if (!s1[i] || !s2[i] || s1[i] != s2[i])
-            return (unsigned char)s1[i] - (unsigned char)s2[i];
-    }
-    return 0;
-}
+// int strncmp(const char *s1, const char *s2, size_t n) {
+//     for (size_t i = 0; i < n; i++) {
+//         if (!s1[i] || !s2[i] || s1[i] != s2[i])
+//             return (unsigned char)s1[i] - (unsigned char)s2[i];
+//     }
+//     return 0;
+// }
+extern int strncmp(const char *s1, const char *s2, size_t n);
 
-char* strcpy(char *dest, const char *src) {
-    char *p = dest;
-    while ((*p++ = *src++) != '\0');
-    return dest;
-}
+// char* strcpy(char *dest, const char *src) {
+//     char *p = dest;
+//     while ((*p++ = *src++) != '\0');
+//     return dest;
+// }
+extern char* strcpy(char *dest, const char *src);
 
-char* strncpy(char *dest, const char *src, size_t n) {
-    size_t i = 0;
-    while (i < n && src[i] != '\0') {
-        dest[i] = src[i];
-        i++;
-    }
-    while (i < n) {
-        dest[i] = '\0';
-        i++;
-    }
-    return dest;
-}
+// char* strncpy(char *dest, const char *src, size_t n) {
+//     size_t i = 0;
+//     while (i < n && src[i] != '\0') {
+//         dest[i] = src[i];
+//         i++;
+//     }
+//     while (i < n) {
+//         dest[i] = '\0';
+//         i++;
+//     }
+//     return dest;
+// }
+extern char* strncpy(char *dest, const char *src, size_t n);
 
-char* strcat(char *dest, const char *src) {
-    char *p = dest;
-    while (*p) p++;
-    while ((*p++ = *src++) != '\0');
-    return dest;
-}
+// char* strcat(char *dest, const char *src) {
+//     char *p = dest;
+//     while (*p) p++;
+//     while ((*p++ = *src++) != '\0');
+//     return dest;
+// }
+extern char* strcat(char *dest, const char *src);
 
-char* strncat(char *dest, const char *src, size_t n) {
-    char *p = dest;
-    while (*p) p++;
-    for (size_t i = 0; i < n && src[i]; i++)
-        *p++ = src[i];
-    *p = '\0';
-    return dest;
-}
+// char* strncat(char *dest, const char *src, size_t n) {
+//     char *p = dest;
+//     while (*p) p++;
+//     for (size_t i = 0; i < n && src[i]; i++)
+//         *p++ = src[i];
+//     *p = '\0';
+//     return dest;
+// }
+extern char* strncat(char *dest, const char *src, size_t n);
 
-char* strchr(const char *s, int c) {
-    while (*s) {
-        if (*s == (char)c) return (char*)s;
-        s++;
-    }
-    if ((char)c == '\0') return (char*)s;
-    return NULL;
-}
+// char* strchr(const char *s, int c) {
+//     while (*s) {
+//         if (*s == (char)c) return (char*)s;
+//         s++;
+//     }
+//     if ((char)c == '\0') return (char*)s;
+//     return NULL;
+// }
+extern char* strchr(const char *s, int c);
 
-char* strrchr(const char *s, int c) {
-    const char *last = NULL;
-    while (*s) {
-        if (*s == (char)c) last = s;
-        s++;
-    }
-    if ((char)c == '\0') return (char*)s;
-    return (char*)last;
-}
+// char* strrchr(const char *s, int c) {
+//     const char *last = NULL;
+//     while (*s) {
+//         if (*s == (char)c) last = s;
+//         s++;
+//     }
+//     if ((char)c == '\0') return (char*)s;
+//     return (char*)last;
+// }
+extern char* strrchr(const char *s, int c);
 
-char* strtok(char *s, const char *delim) {
-    static char *next = NULL;
-    if (s) next = s;
-    if (!next) return NULL;
-    while (*next && strchr(delim, *next)) next++;
-    if (!*next) return NULL;
-    char *start = next;
-    while (*next && !strchr(delim, *next)) next++;
-    if (*next) *next++ = '\0';
-    return start;
-}
+// char* strtok(char *s, const char *delim) {
+//     static char *next = NULL;
+//     if (s) next = s;
+//     if (!next) return NULL;
+//     while (*next && strchr(delim, *next)) next++;
+//     if (!*next) return NULL;
+//     char *start = next;
+//     while (*next && !strchr(delim, *next)) next++;
+//     if (*next) *next++ = '\0';
+//     return start;
+// }
+extern char* strtok(char *s, const char *delim);
 
-void* memcpy(void* restrict dest, const void* restrict src, size_t n) {
-    uint8_t *dstbuf       = (uint8_t*) dest;
-    const uint8_t *srcbuf = (const uint8_t*) src;
-    for (size_t i = 0; i < n; i++)
-        dstbuf[i] = srcbuf[i];
-    return dstbuf;
-}
+// void* memcpy(void* restrict dest, const void* restrict src, size_t n) {
+//     uint8_t *dstbuf       = (uint8_t*) dest;
+//     const uint8_t *srcbuf = (const uint8_t*) src;
+//     for (size_t i = 0; i < n; i++)
+//         dstbuf[i] = srcbuf[i];
+//     return dstbuf;
+// }
+extern void* memcpy(void* dest, const void* src, size_t n);
 
 struct DirectoryTraversal {
     uint8_t* base;

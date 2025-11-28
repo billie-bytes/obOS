@@ -31,6 +31,9 @@
                     "text": "symbol-file ${workspaceFolder}/bin/kernel",  // ← Tambahkan full path
                     "description": "Get kernel symbols"
                 },
+                {   "text": "add-symbol-file shell_elf", 
+                    "description": "Get shell symbols" 
+                },
                 {
                     "text": "add-symbol-file ${workspaceFolder}/bin/shell_elf",  // ← Tambahkan full path
                     "description": "Get shell symbols",
