@@ -3,6 +3,7 @@
     "C_Cpp.dimInactiveRegions": false,
     "files.associations": {
         "stdbool.h": "c",
-        "disk.h": "c"
+        "disk.h": "c",
+        "process.h": "c"
     },
 }

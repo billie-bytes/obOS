@@ -9,6 +9,7 @@
 #include "header/filesystem/ext2.h"
 #include "header/memory/paging.h"
 #include "header/process/process.h"
+#include "header/scheduler/scheduler.h"
 #include <stdbool.h>
 
 void kernel_setup(void) {
@@ -22,9 +23,6 @@ void kernel_setup(void) {
     gdt_install_tss();
     set_tss_register();
 
-    // Allocate first 4 MiB virtual memory (book sequence)
-    paging_allocate_user_page_frame(&_paging_kernel_page_directory, (uint8_t*) 0);
-
     // Write shell into memory
     struct EXT2DriverRequest request = {
         .buf         = (uint8_t*) 0,
@@ -34,18 +32,14 @@ void kernel_setup(void) {
         .buffer_size = 0x100000,
         .is_folder   = false,
     };
-    read(request);
 
-    // Set TSS $esp pointer and jump into shell 
+    // Set TSS.esp0 for interprivilege interrupt
     set_tss_kernel_current_stack();
-    kernel_execute_user_program((uint8_t*) 0);
 
-    // Create & execute process 0
+    // Create init process and execute it
     process_create_user_process(request);
-    paging_use_page_directory(_process_list[0].context.page_directory_virtual_addr);
-    kernel_execute_user_program((void*) 0x0);
-
-    while (true);
+    scheduler_init();
+    scheduler_switch_to_next_process();
 }
 
 

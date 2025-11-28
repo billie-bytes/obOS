@@ -48,7 +48,7 @@ process_context_switch:
     mov eax, [ecx + 0x30]
     push eax
 
-    ; Step 4: load the next PCB to the cpu register (we can do at any order except we need to push ecx and eax in the alst order)
+    ; Step 4: load the next PCB to the cpu register (we can do at any order except we need to push ecx and eax in the last order)
 
     ; Register segment
     mov ds, [ecx + 0x2C]

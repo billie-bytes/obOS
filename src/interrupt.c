@@ -10,7 +10,7 @@ struct TSSEntry _interrupt_tss_entry = {
     .ss0  = GDT_KERNEL_DATA_SEGMENT_SELECTOR,
 };
 
-static void syscall(struct InterruptFrame frame);
+void syscall(struct InterruptFrame frame);
 
 void io_wait(void) {
     out(0x80, 0);
@@ -144,7 +144,10 @@ void activate_timer_interrupt(void) {
 
     // Activate the interrupt
     out(PIC1_DATA, in(PIC1_DATA) & ~(1 << IRQ_TIMER));
+    __asm__ volatile("sti");
+
 }
+
 
 
 
