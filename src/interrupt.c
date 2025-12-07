@@ -7,6 +7,7 @@
 #include "header/text/framebuffer.h"
 #include "header/scheduler/scheduler.h"
 #include "header/process/process.h"
+#include "header/cmos/cmos.h"
 
 struct TSSEntry _interrupt_tss_entry = {
     .ss0  = GDT_KERNEL_DATA_SEGMENT_SELECTOR,
@@ -162,7 +163,11 @@ void syscall(struct InterruptFrame frame) {
         case 11:
         /* Create new user process */
             struct EXT2DriverRequest *req = (struct EXT2DriverRequest *)frame.cpu.general.ebx;
-            frame.cpu.general.eax = process_create_user_process(*req);
+            if (req == NULL) {
+                frame.cpu.general.eax = -1;
+            } else {
+                frame.cpu.general.eax = process_create_user_process(*req);
+            }
             break;
         case 12:
         /* Destroy process by pid */    
@@ -176,6 +181,18 @@ void syscall(struct InterruptFrame frame) {
             frame.cpu.general.eax = get_process_info(
                 (ProcessInfo *)frame.cpu.general.ebx,
                 frame.cpu.general.ecx);
+            break;
+        case 14:
+        /* Get CMOS time data */
+            // ebx = pointer to cmos_reader struct
+            cmos_reader *cmos_buf = (cmos_reader *)frame.cpu.general.ebx;
+            *cmos_buf = get_cmos_data();
+            break;
+        case 15:
+        /* Put char at specific position */
+            // ebx = row, ecx = col, edx = char, edi = color
+            framebuffer_write((uint8_t)frame.cpu.general.ebx, (uint8_t)frame.cpu.general.ecx, 
+                             (char)frame.cpu.general.edx, (uint8_t)frame.cpu.index.edi, 0);
             break;
     }
 }

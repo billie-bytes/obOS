@@ -1,5 +1,7 @@
 #include <stdint.h>
-#include "header/filesystem/ext2.h"
+#include <stdbool.h>
+#include <stddef.h>
+#include "header/stdlib/string.h"
 
 #define COLOR_PROMPT_USER  0x0A
 #define COLOR_PROMPT_SEP   0x07
@@ -557,7 +559,15 @@ static void cmd_exec(int argc, char* argv[]) {
         sys_puts("exec: process created successfully\n", 36, COLOR_TXT);
     } else {
         sys_puts("exec: failed with code ", 24, COLOR_TXT);
-        sys_putchar('0' + (retcode & 0xF), COLOR_TXT);
+        // Print decimal number properly
+        if (retcode < 0) {
+            sys_putchar('-', COLOR_TXT);
+            retcode = -retcode;
+        }
+        if (retcode >= 10) {
+            sys_putchar('0' + (retcode / 10), COLOR_TXT);
+        }
+        sys_putchar('0' + (retcode % 10), COLOR_TXT);
         sys_putchar('\n', COLOR_TXT);
     }
 }
@@ -637,8 +647,7 @@ static void cmd_kill(int argc, char* argv[]) {
 static void cmd_exit(int argc, char* argv[]) {
     (void)argc; (void)argv;
     sys_puts("bye\n", 5, COLOR_TXT);
-    sys_exit();  // Use syscall to properly exit
-    while(1) {}  // Fallback in case syscall doesn't work
+    while(1) {}
 }
 
 static int parse_command(char* line, char* argv[], int maxargs) {

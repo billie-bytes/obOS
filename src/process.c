@@ -77,26 +77,45 @@ int32_t process_create_user_process(struct EXT2DriverRequest request) {
 
     // Process PCB 
     int32_t p_index = process_list_get_inactive_index();
-    struct ProcessControlBlock *new_pcb = &(_process_list[p_index]);
 
     if (p_index < 0){
         // Tidak ada slot kosong
         retcode = PROCESS_CREATE_FAIL_MAX_PROCESS_EXCEEDED;
         goto exit_cleanup;
     }
+    
+    struct ProcessControlBlock *new_pcb = &(_process_list[p_index]);
 
     /* 1. Pembuatan virtual address space baru dengan page directory */
     new_pcb->context.page_directory_virtual_addr = paging_create_new_page_directory();
     paging_allocate_user_page_frame(new_pcb->context.page_directory_virtual_addr, (uint8_t *) 0);
     paging_allocate_user_page_frame(new_pcb->context.page_directory_virtual_addr, (uint8_t *) 0xBFFFFFFC);
 
+    // Copy request.name to local buffer before switching page directory
+    char name_buffer[PROCESS_NAME_LENGTH_MAX];
+    uint8_t copy_len = request.name_len < PROCESS_NAME_LENGTH_MAX - 1 ? request.name_len : PROCESS_NAME_LENGTH_MAX - 1;
+    for (uint8_t i = 0; i < copy_len; i++) {
+        name_buffer[i] = request.name[i];
+    }
+    name_buffer[copy_len] = '\0';
+    request.name = name_buffer;
+    request.name_len = copy_len;
+
     struct PageDirectory *old_page_directory = paging_get_current_page_directory_addr();
     paging_use_page_directory(new_pcb->context.page_directory_virtual_addr);
 
     /* 2. Membaca dan melakukan load executable dari file system ke memory baru */
-    read(request);
-
+    int8_t read_retcode = read(request);
+    
     paging_use_page_directory(old_page_directory);
+    
+    // Check if read failed
+    if (read_retcode != 0) {
+        // Cleanup: free allocated page directory and frames
+        retcode = PROCESS_CREATE_FAIL_FS_READ_FAILURE;
+        goto exit_cleanup;
+    }
+    
     /* 3. Menyiapkan state & context awal untuk program */
     new_pcb->context.cpu.segment.ds = 0x20 | 0x3;
     new_pcb->context.cpu.segment.es = 0x20 | 0x3;
@@ -117,13 +136,12 @@ int32_t process_create_user_process(struct EXT2DriverRequest request) {
     new_pcb->metadata.pid = process_generate_new_pid();
     new_pcb->metadata.state = PROCESS_READY;
     
-    // Copy name to static array
-    uint8_t copy_len = request.name_len < PROCESS_NAME_LENGTH_MAX - 1 ? request.name_len : PROCESS_NAME_LENGTH_MAX - 1;
-    for (uint8_t i = 0; i < copy_len; i++) {
+    // Copy name from buffer (already copied before page directory switch)
+    for (uint8_t i = 0; i < request.name_len; i++) {
         new_pcb->metadata.name[i] = request.name[i];
     }
-    new_pcb->metadata.name[copy_len] = '\0';
-    new_pcb->metadata.name_len = copy_len;
+    new_pcb->metadata.name[request.name_len] = '\0';
+    new_pcb->metadata.name_len = request.name_len;
     
     // Mark process slot as used
     process_manager_state._process_used[p_index] = true;
