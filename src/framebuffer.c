@@ -27,10 +27,12 @@ void framebuffer_set_cursor(uint8_t r, uint8_t c) {
 void framebuffer_clear(void) {
     uint16_t *textmemptr = (uint16_t*)FRAMEBUFFER_MEMORY_OFFSET;
     uint16_t blank = ((uint16_t)' ') | ((uint16_t)0x0F << 8);
-    for (int i = 0; i < 80*80; i++) {
+    for (int i = 0; i < 80*25; i++) {
         textmemptr[i] = blank;
-        framebuffer_set_cursor(0,0);
     }
+    cursor_row = 0;
+    cursor_col = 0;
+    framebuffer_set_cursor(0,0);
 }
 
 void putchar(char c, uint8_t color) {
@@ -56,6 +58,20 @@ void putchar(char c, uint8_t color) {
             cursor_col = 0;
             cursor_row++;
         }
+    }
+    // Scroll 
+    if (cursor_row >= 24) {
+        uint16_t *vmem = (uint16_t*)FRAMEBUFFER_MEMORY_OFFSET;
+        for (int r = 1; r < 24; r++) {
+            for (int c = 0; c < 80; c++) {
+                vmem[(r-1)*80 + c] = vmem[r*80 + c];
+            }
+        }
+        uint16_t blank = ((uint16_t)' ') | ((uint16_t)0x0F << 8);
+        for (int c = 0; c < 80; c++) {
+            vmem[23*80 + c] = blank;
+        }
+        cursor_row = 23;
     }
     
     framebuffer_set_cursor(cursor_row, cursor_col);

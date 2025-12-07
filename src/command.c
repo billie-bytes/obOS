@@ -39,8 +39,9 @@ static inline char getchar_blocking(void) {
     char c = 0; do { syscall(4u, (uint32_t)&c, 0, 0); } while (c == 0); return c;
 }
 static inline void kbd_activate(void)                               { syscall(7u, 0, 0, 0); }
-static inline void set_cursor_pos(uint8_t x, uint8_t y)             { syscall(9u, x, y, 0); }
-static inline void get_cursor_pos(uint8_t* x, uint8_t* y)           { syscall(10u, (uint32_t)x, (uint32_t)y, 0); }
+static inline void set_cursor_pos(uint8_t x, uint8_t y)             { syscall(16u, x, y, 0); }
+static inline void get_cursor_pos(uint8_t* x, uint8_t* y)           { syscall(17u, (uint32_t)x, (uint32_t)y, 0); }
+static inline void clear_screen(void)                               { syscall(8u, 0, 0, 0); }
 
 static inline int8_t fs_readfile(struct EXT2DriverRequest* r, int8_t* rc)    { syscall(0, (uint32_t)r, (uint32_t)rc, 0); return *rc; }
 static inline int8_t fs_readdir(struct EXT2DriverRequest* r, int8_t* rc)     { syscall(1, (uint32_t)r, (uint32_t)rc, 0); return *rc; }

@@ -77,11 +77,11 @@ void set_tss_kernel_current_stack(void) {
     _interrupt_tss_entry.esp0 = stack_ptr + 8; 
 }
 
-void sleep(uint32_t ticks) {
-    // This is a simple busy-wait loop, not accurate and will block the CPU
-    for (uint32_t i = 0; i < ticks * 10000; i++) {
-        __asm__ volatile ("nop");
-    }
+extern uint64_t scheduler_get_ticks(void);
+
+static inline uint32_t ms_to_ticks(uint32_t ms) {
+    uint32_t prod = ms * (uint32_t)PIT_TIMER_FREQUENCY;
+    return (prod + 999u) / 1000u;
 }
 
 void syscall(struct InterruptFrame frame) {
@@ -144,12 +144,24 @@ void syscall(struct InterruptFrame frame) {
         case 7: 
             keyboard_state_activate();
             break;
-        // case 8:
-            /* Syscall 8: clear screen (should be a graphic implementation here)*/
+        case 8:
+        /* Clear screen */
+            framebuffer_clear();
+            break;
 
         case 9:
         /* Sleep */
-            sleep(frame.cpu.general.ebx);
+            {
+                struct ProcessControlBlock *pcb = process_get_current_running_pcb_pointer();
+                if (pcb != NULL) {
+                    uint64_t now = scheduler_get_ticks();
+                    uint32_t ms = (uint32_t)frame.cpu.general.ebx;
+                    uint32_t add_ticks = ms_to_ticks(ms);
+                    pcb->metadata.wake_tick = now + (uint64_t)add_ticks;
+                    pcb->metadata.state = PROCESS_SLEEPING;
+                    scheduler_switch_to_next_process();
+                }
+            }
             break;
         case 10:
         /* Process exit - terminate current process */
@@ -159,6 +171,16 @@ void syscall(struct InterruptFrame frame) {
                     process_manager_state._process_used[pcb->metadata.pid] = false;
                     process_manager_state.active_process_count--;
                 }
+            break;
+        case 16:
+        /* Set cursor position: ebx=row, ecx=col */
+            framebuffer_set_cursor((uint8_t)frame.cpu.general.ebx, (uint8_t)frame.cpu.general.ecx);
+            break;
+        case 17:
+        /* Get cursor position: ebx=ptr_row, ecx=ptr_col */
+            if (frame.cpu.general.ebx && frame.cpu.general.ecx) {
+                
+            }
             break;
         case 11:
         /* Create new user process */

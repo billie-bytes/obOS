@@ -38,6 +38,15 @@ struct EXT2DriverRequest {
 uint32_t current_directory_inode = 2;
 char current_path[256] = "/";
 
+// Directory traversal helper types used by autocomplete and path helpers
+struct DirectoryTraversal {
+    uint8_t* base;
+    uint32_t size;
+    uint32_t off;
+};
+
+static bool dirwalk_next(struct DirectoryTraversal* it, struct EXT2DirectoryEntry* out_entry, char* name_buf, uint16_t name_buf_sz);
+
 void syscall_do(uint32_t eax, uint32_t ebx, uint32_t ecx, uint32_t edx) {
     __asm__ volatile("mov %0, %%ebx" : : "r"(ebx));
     __asm__ volatile("mov %0, %%ecx" : : "r"(ecx));
@@ -56,6 +65,10 @@ static inline void sys_puts(const char *s, uint32_t len, uint8_t color) {
 
 static inline void sys_getchar(char *out) {
     syscall_do(4u, (uint32_t)out, 0, 0);
+}
+
+static inline char read_key_blocking(void) {
+    char k = 0; do { sys_getchar(&k); } while (!k); return k;
 }
 
 static inline void sys_keyboard_activate(void) {
@@ -143,6 +156,132 @@ static void print_prompt(void) {
     sys_puts(":", 1, COLOR_PROMPT_SEP);
     sys_puts(current_path, strlen(current_path), COLOR_PROMPT_USER);
     sys_puts("$ ", 2, COLOR_PROMPT_SEP);
+}
+// history
+#define HIST_MAX 32
+static char history[HIST_MAX][MAX_INPUT_LEN];
+static int  hist_len[HIST_MAX];
+static int  hist_head = 0;   // next slot to write
+static int  hist_count = 0;  // number of stored entries
+static int  hist_nav = -1;   // -1 means not navigating, otherwise index 0..hist_count-1
+
+static void history_add(const char* line, int len){
+    if (len <= 0) return;
+    if (len >= MAX_INPUT_LEN) len = MAX_INPUT_LEN-1;
+    for (int i=0;i<len;i++) history[hist_head][i] = line[i];
+    history[hist_head][len] = 0;
+    hist_len[hist_head] = len;
+    hist_head = (hist_head + 1) % HIST_MAX;
+    if (hist_count < HIST_MAX) hist_count++; 
+    hist_nav = -1;
+}
+
+static int history_get(int idx, char* out){
+    if (idx < 0 || idx >= hist_count) return 0;
+    int oldest = (hist_head - hist_count + HIST_MAX) % HIST_MAX;
+    int slot = (oldest + idx) % HIST_MAX;
+    int len = hist_len[slot];
+    for (int i=0;i<len;i++) out[i] = history[slot][i];
+    out[len] = 0;
+    return len;
+}
+
+// Clear current 
+static void erase_input_line(int len){
+    for (int i=0;i<len;i++) { sys_putchar('\b', COLOR_INPUT); sys_putchar(' ', COLOR_INPUT); sys_putchar('\b', COLOR_INPUT); }
+}
+
+static int autocomplete(char* buf, int cur_len){
+    // Find last token in buf
+    int start = 0;
+    for (int i=cur_len-1;i>=0;i--) { if (buf[i]==' '||buf[i]=='\t'){ start = i+1; break; } }
+    const char* prefix = buf + start;
+    int prefix_len = cur_len - start;
+
+    // Detect if first word (command) or argument
+    bool is_first_word = true;
+    for (int i = 0; i < start; i++) {
+        if (buf[i] != ' ' && buf[i] != '\t') { is_first_word = false; break; }
+    }
+
+    // Collect matches
+    uint8_t dirbuf[DIRBUF_BYTES];
+    int matches = 0;
+    char match_name[256] = {0};
+    uint8_t match_types[HIST_MAX];
+    char match_list[HIST_MAX][256];
+
+    if (is_first_word) {
+        const char* builtins[] = { "ls","cd","pwd","cat","mkdir","exec","ps","kill","clear","help","exit" };
+        int ncmd = (int)(sizeof(builtins)/sizeof(builtins[0]));
+        for (int i=0;i<ncmd;i++) {
+            if (prefix_len == 0 || strncmp(builtins[i], prefix, (size_t)prefix_len) == 0) {
+                if (matches < HIST_MAX) {
+                    strncpy(match_list[matches], builtins[i], sizeof(match_list[matches]));
+                    match_types[matches] = EXT2_FT_REG_FILE; // treat as command
+                    if (matches == 0) strncpy(match_name, builtins[i], sizeof(match_name));
+                    matches++;
+                }
+            }
+        }
+    } else {
+        // Read directory entries of current directory
+        struct EXT2DriverRequest req = {
+            .buf = dirbuf,
+            .buffer_size = sizeof(dirbuf),
+            .parent_inode = current_directory_inode,
+            .name = ".",
+            .name_len = 1,
+            .is_folder = true
+        };
+        int8_t rc = -1;
+        fs_readdir(&req, &rc);
+        if (rc != 0) return 0;
+
+        struct DirectoryTraversal it = { .base = dirbuf, .size = sizeof(dirbuf), .off = 0 };
+        struct EXT2DirectoryEntry e;
+        char nm[256];
+        while (dirwalk_next(&it, &e, nm, sizeof(nm))) {
+            if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0) continue;
+            if (prefix_len == 0 || (int)strncmp(nm, prefix, (size_t)prefix_len) == 0) {
+                if (matches < HIST_MAX) {
+                    strncpy(match_list[matches], nm, sizeof(match_list[matches]));
+                    match_types[matches] = e.file_type;
+                    if (matches == 0) strncpy(match_name, nm, sizeof(match_name));
+                    matches++;
+                }
+            }
+        }
+    }
+
+    if (matches == 0) return 0;
+    if (matches == 1) {
+        // Complete the token
+        int add = (int)strlen(match_name) - prefix_len;
+        for (int i=0;i<add && cur_len < MAX_INPUT_LEN-1;i++) {
+            buf[cur_len++] = match_name[prefix_len + i];
+            sys_putchar(match_name[prefix_len + i], COLOR_INPUT);
+        }
+        // Add a trailing slash for directory args, space otherwise
+        if (!is_first_word) {
+            uint8_t t = match_types[0];
+            if (t == EXT2_FT_DIR && cur_len < MAX_INPUT_LEN-1) { buf[cur_len++] = '/'; sys_putchar('/', COLOR_INPUT); }
+            else if (cur_len < MAX_INPUT_LEN-1) { buf[cur_len++] = ' '; sys_putchar(' ', COLOR_INPUT); }
+        }
+        return cur_len;
+    }
+    // Multiple matches: print newline, list, then reprint prompt + line
+    sys_putchar('\n', COLOR_TXT);
+    for (int i=0;i<matches;i++) {
+        uint8_t color = (!is_first_word && match_types[i] == EXT2_FT_DIR) ? COLOR_DIR : COLOR_TXT;
+        sys_puts(match_list[i], strlen(match_list[i]), color);
+        if (!is_first_word && match_types[i] == EXT2_FT_DIR) sys_putchar('/', COLOR_DIR);
+        sys_putchar(' ', COLOR_TXT);
+    }
+    sys_putchar('\n', COLOR_TXT);
+    print_prompt();
+    sys_puts(buf, cur_len, COLOR_INPUT);
+    return cur_len;
 }
 
 
@@ -245,12 +384,6 @@ extern char* strtok(char *s, const char *delim);
 //     return dstbuf;
 // }
 extern void* memcpy(void* dest, const void* src, size_t n);
-
-struct DirectoryTraversal {
-    uint8_t* base;
-    uint32_t size;
-    uint32_t off;
-};
 
 static bool dirwalk_next(struct DirectoryTraversal* it, struct EXT2DirectoryEntry* out_entry, char* name_buf, uint16_t name_buf_sz) {
     while (it->off + 9 <= it->size) {
@@ -650,6 +783,7 @@ static void cmd_exit(int argc, char* argv[]) {
     while(1) {}
 }
 
+
 static int parse_command(char* line, char* argv[], int maxargs) {
     int n = 0;
     char* p = line;
@@ -675,7 +809,7 @@ static void execute_command(int argc, char* argv[]) {
     else if (strcmp(argv[0], "exec") == 0) cmd_exec(argc, argv);
     else if (strcmp(argv[0], "ps") == 0) cmd_ps(argc, argv);
     else if (strcmp(argv[0], "kill") == 0) cmd_kill(argc, argv);
-    else if (strcmp(argv[0], "clear") == 0) for (int i = 0; i < 40; i++) sys_putchar('\n', COLOR_TXT);
+    else if (strcmp(argv[0], "clear") == 0) { __asm__ volatile("mov $8, %eax; int $0x30"); }
     else if (strcmp(argv[0], "exit") == 0) cmd_exit(argc, argv);
     else { sys_puts("undefined command: ", 19, COLOR_TXT); sys_puts(argv[0], strlen(argv[0]), COLOR_TXT); sys_putchar('\n', COLOR_TXT); }
 }
@@ -693,6 +827,69 @@ int main(void) {
         char c = 0;
         sys_getchar(&c);
         if (!c) continue;
+        // ANSI escape sequence for Up/Down (ESC [ A/B)
+        if (c == 0x1B) {
+            char b1 = read_key_blocking();
+            if (b1 == '[') {
+                char b2 = read_key_blocking();
+                if (b2 == 'A' && hist_count > 0) {
+                    if (hist_nav < 0) hist_nav = hist_count - 1; else if (hist_nav > 0) hist_nav--;
+                    char tmp[MAX_INPUT_LEN]; int hlen = history_get(hist_nav, tmp);
+                    erase_input_line(len);
+                    {
+                        for (int i=0;i<hlen;i++) line[i] = tmp[i];
+                        len = hlen;
+                        line[len] = 0;
+                        sys_puts(line, len, COLOR_INPUT);
+                    }
+                    continue;
+                }
+                if (b2 == 'B' && hist_count > 0) {
+                    if (hist_nav >= 0) {
+                        hist_nav++;
+                    }
+                    if (hist_nav >= hist_count) {
+                        hist_nav = -1;
+                    }
+                    erase_input_line(len);
+                    if (hist_nav >= 0) { char tmp[MAX_INPUT_LEN]; int hlen = history_get(hist_nav, tmp); for (int i=0;i<hlen;i++) line[i] = tmp[i]; len = hlen; line[len] = 0; sys_puts(line, len, COLOR_INPUT); }
+                    else { len = 0; line[0] = 0; }
+                    continue;
+                }
+                continue;
+            }
+            continue;
+        }
+        if ((unsigned char)c == 0x80 /*KEY_UP*/ && hist_count > 0) {
+            if (hist_nav < 0) hist_nav = hist_count - 1; else if (hist_nav > 0) hist_nav--;
+            char tmp[MAX_INPUT_LEN]; int hlen = history_get(hist_nav, tmp);
+            erase_input_line(len);
+            for (int i=0;i<hlen;i++) line[i] = tmp[i];
+            len = hlen; line[len] = 0;
+            sys_puts(line, len, COLOR_INPUT);
+            continue;
+        }
+        if ((unsigned char)c == 0x81 /*KEY_DOWN*/ && hist_count > 0) {
+            if (hist_nav >= 0) {
+                hist_nav++;
+            }
+            if (hist_nav >= hist_count) {
+                hist_nav = -1;
+            }
+            // -1 means empty current line
+            erase_input_line(len);
+            if (hist_nav >= 0) { char tmp[MAX_INPUT_LEN]; int hlen = history_get(hist_nav, tmp);
+                {
+                    for (int i=0;i<hlen;i++) line[i] = tmp[i];
+                    len = hlen;
+                    line[len]=0;
+                    sys_puts(line, len, COLOR_INPUT);
+                }
+            } else { len = 0; line[0]=0; }
+            continue;
+        }
+        // Tab autocomplete
+        if (c == '\t') { len = autocomplete(line, len); hist_nav = -1; continue; }
 
         if (c == '\b' || c == 127) {
             if (len > 0) {
@@ -708,7 +905,7 @@ int main(void) {
             sys_putchar('\n', COLOR_INPUT);
             line[len] = 0;
             argc = parse_command(line, argv, MAX_ARGS);
-            if (argc > 0) execute_command(argc, argv);
+            if (argc > 0) { execute_command(argc, argv); history_add(line, len); }
             len = 0;
             print_prompt();
             continue;
@@ -724,6 +921,7 @@ int main(void) {
         if (c >= 32 && c <= 126 && len < MAX_INPUT_LEN - 1) {
             sys_putchar(c, COLOR_INPUT);
             line[len++] = c;
+            hist_nav = -1;
         }
     }
 

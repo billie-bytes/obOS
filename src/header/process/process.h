@@ -70,6 +70,7 @@ typedef enum PROCESS_STATE {
     PROCESS_TERMINATED,
     PROCESS_RUNNING,
     PROCESS_READY,
+    PROCESS_SLEEPING,
 } PROCESS_STATE;
 
 /**
@@ -85,6 +86,7 @@ struct ProcessControlBlock {
         enum PROCESS_STATE state;
         char name[PROCESS_NAME_LENGTH_MAX];
         uint8_t name_len;
+        uint64_t wake_tick; // used when PROCESS_SLEEPING
     } metadata;
 
     struct Context context;
