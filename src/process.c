@@ -116,7 +116,14 @@ int32_t process_create_user_process(struct EXT2DriverRequest request) {
     /* 4. Mencatat semua informasi penting process ke metadata PCB */
     new_pcb->metadata.pid = process_generate_new_pid();
     new_pcb->metadata.state = PROCESS_READY;
-    memcpy(&new_pcb->metadata.name, request.name, 8);
+    
+    // Copy name to static array
+    uint8_t copy_len = request.name_len < PROCESS_NAME_LENGTH_MAX - 1 ? request.name_len : PROCESS_NAME_LENGTH_MAX - 1;
+    for (uint8_t i = 0; i < copy_len; i++) {
+        new_pcb->metadata.name[i] = request.name[i];
+    }
+    new_pcb->metadata.name[copy_len] = '\0';
+    new_pcb->metadata.name_len = copy_len;
     
     // Mark process slot as used
     process_manager_state._process_used[p_index] = true;
@@ -125,4 +132,43 @@ int32_t process_create_user_process(struct EXT2DriverRequest request) {
     
 exit_cleanup:
     return retcode;
+}
+
+bool process_destroy(uint32_t pid){
+    for (int i = 0; i < PROCESS_COUNT_MAX; i++){
+        if (_process_list[i].metadata.pid == pid && _process_list[i].metadata.state != PROCESS_TERMINATED){
+            memset(&_process_list[i], 0, sizeof(struct ProcessControlBlock));
+            _process_list[i].metadata.state = PROCESS_TERMINATED;
+            process_manager_state.active_process_count--;
+            return true;
+        }
+    }
+    return false;
+}
+
+int32_t get_process_info(ProcessInfo *buffer, uint32_t bufsize){
+    uint32_t count = 0;
+    for (int i = 0; i < PROCESS_COUNT_MAX && count < bufsize; i++){
+        // Only return processes that are actually used
+        if (!process_manager_state._process_used[i]){
+            continue;
+        }
+        
+        buffer[count].pid = _process_list[i].metadata.pid;
+        buffer[count].state = _process_list[i].metadata.state;
+        
+        // Copy name string to avoid kernel-user space pointer issue
+        uint8_t len = _process_list[i].metadata.name_len;
+        if (len > 31) len = 31;  // Leave room for null terminator
+        
+        // Copy name character by character
+        for (uint8_t j = 0; j < len && _process_list[i].metadata.name[j] != '\0'; j++) {
+            buffer[count].name[j] = _process_list[i].metadata.name[j];
+        }
+        buffer[count].name[len] = '\0';  // Null terminate
+        buffer[count].name_len = len;
+        
+        count++;
+    }
+    return (int32_t)count;
 }

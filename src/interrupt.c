@@ -6,6 +6,7 @@
 #include "header/filesystem/ext2.h"
 #include "header/text/framebuffer.h"
 #include "header/scheduler/scheduler.h"
+#include "header/process/process.h"
 
 struct TSSEntry _interrupt_tss_entry = {
     .ss0  = GDT_KERNEL_DATA_SEGMENT_SELECTOR,
@@ -75,6 +76,13 @@ void set_tss_kernel_current_stack(void) {
     _interrupt_tss_entry.esp0 = stack_ptr + 8; 
 }
 
+void sleep(uint32_t ticks) {
+    // This is a simple busy-wait loop, not accurate and will block the CPU
+    for (uint32_t i = 0; i < ticks * 10000; i++) {
+        __asm__ volatile ("nop");
+    }
+}
+
 void syscall(struct InterruptFrame frame) {
     switch (frame.cpu.general.eax) {
         case 0:
@@ -134,6 +142,40 @@ void syscall(struct InterruptFrame frame) {
             break;
         case 7: 
             keyboard_state_activate();
+            break;
+        // case 8:
+            /* Syscall 8: clear screen (should be a graphic implementation here)*/
+
+        case 9:
+        /* Sleep */
+            sleep(frame.cpu.general.ebx);
+            break;
+        case 10:
+        /* Process exit - terminate current process */
+            struct ProcessControlBlock *pcb = process_get_current_running_pcb_pointer();
+                if (pcb != NULL){
+                    pcb->metadata.state = PROCESS_TERMINATED;
+                    process_manager_state._process_used[pcb->metadata.pid] = false;
+                    process_manager_state.active_process_count--;
+                }
+            break;
+        case 11:
+        /* Create new user process */
+            struct EXT2DriverRequest *req = (struct EXT2DriverRequest *)frame.cpu.general.ebx;
+            frame.cpu.general.eax = process_create_user_process(*req);
+            break;
+        case 12:
+        /* Destroy process by pid */    
+            frame.cpu.general.eax = process_destroy(frame.cpu.general.ebx) ? 0 : -1;
+            break;
+        case 13:
+        /* Get process info */
+            // ebx = pointer to ProcessInfo
+            // ecx = size of ProcessInfo
+            // eax = number of process info written
+            frame.cpu.general.eax = get_process_info(
+                (ProcessInfo *)frame.cpu.general.ebx,
+                frame.cpu.general.ecx);
             break;
     }
 }

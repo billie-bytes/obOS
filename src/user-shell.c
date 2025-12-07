@@ -1,7 +1,5 @@
 #include <stdint.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include "header/stdlib/string.h"
+#include "header/filesystem/ext2.h"
 
 #define COLOR_PROMPT_USER  0x0A
 #define COLOR_PROMPT_SEP   0x07
@@ -83,6 +81,53 @@ static inline int8_t fs_readdir(struct EXT2DriverRequest* r, int8_t* rc) {
 static inline int8_t fs_write(struct EXT2DriverRequest* r, int8_t* rc) {
     syscall_do(2, (uint32_t)r, (uint32_t)rc, 0);
     return *rc;
+}
+
+static inline int8_t fs_delete(struct EXT2DriverRequest* r, int8_t* rc) {
+    syscall_do(3, (uint32_t)r, (uint32_t)rc, 0);
+    return *rc;
+}
+
+// Syscall 10: Process exit
+static inline void sys_exit(void) {
+    syscall_do(10, 0, 0, 0);
+}
+
+// Syscall 11: Create process (exec)
+static inline int32_t sys_exec(struct EXT2DriverRequest* req) {
+    int32_t retval;
+    syscall_do(11, (uint32_t)req, 0, 0);
+    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
+    return retval;
+}
+
+// Syscall 12: Kill process by PID
+static inline int32_t sys_kill(uint32_t pid) {
+    int32_t retval;
+    syscall_do(12, pid, 0, 0);
+    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
+    return retval;
+}
+
+// Syscall 13: Get process info (ps)
+typedef enum {
+    PROCESS_TERMINATED = 0,
+    PROCESS_RUNNING = 1,
+    PROCESS_READY = 2,
+} PROCESS_STATE;
+
+typedef struct {
+    uint32_t pid;
+    PROCESS_STATE state;
+    char name[32];  // Changed from pointer to array to avoid kernel-user space issue
+    uint8_t name_len;
+} ProcessInfo;
+
+static inline int32_t sys_ps(ProcessInfo *buffer, uint32_t bufsize) {
+    int32_t count;
+    syscall_do(13, (uint32_t)buffer, bufsize, 0);
+    __asm__ volatile("mov %%eax, %0" : "=r"(count));
+    return count;
 }
 
 // size_t strlen(const char *str) {
@@ -321,6 +366,9 @@ static void cmd_help(int argc, char* argv[]) {
     sys_puts("  pwd\n", 6, COLOR_TXT);
     sys_puts("  cat <FILE>\n", 13, COLOR_TXT);
     sys_puts("  mkdir <DIR>\n", 14, COLOR_TXT);
+    sys_puts("  exec <PROGRAM>\n", 17, COLOR_TXT);
+    sys_puts("  ps\n", 5, COLOR_TXT);
+    sys_puts("  kill <PID>\n", 13, COLOR_TXT);
     sys_puts("  clear\n", 8, COLOR_TXT);
     sys_puts("  help\n", 7, COLOR_TXT);
     sys_puts("  exit\n", 7, COLOR_TXT);
@@ -468,10 +516,129 @@ static void cmd_mkdir(int argc, char* argv[]) {
     sys_putchar('\n', COLOR_TXT);
 }
 
+static void cmd_exec(int argc, char* argv[]) {
+    if (argc < 2) { 
+        sys_puts("exec: missing program name\n", 28, COLOR_TXT); 
+        return; 
+    }
+    
+    // Parse path to get parent directory and filename
+    char parent_path[MAX_LINE], base[MAX_LINE];
+    split_path(argv[1], parent_path, base);
+    
+    uint32_t parent_inode;
+    if (argv[1][0] == '/') {
+        if (strcmp(parent_path, "/") == 0) parent_inode = 2;
+        else if (!resolve_path(parent_path, &parent_inode)) {
+            sys_puts("exec: parent not found\n", 23, COLOR_TXT);
+            return;
+        }
+    } else {
+        if (strcmp(parent_path, ".") == 0) parent_inode = current_directory_inode;
+        else if (!resolve_path(parent_path, &parent_inode)) {
+            sys_puts("exec: parent not found\n", 23, COLOR_TXT);
+            return;
+        }
+    }
+    
+    // Create process request
+    struct EXT2DriverRequest req = {
+        .buf = (uint8_t*) 0,  // Kernel will load at address 0
+        .name = base,
+        .name_len = (uint8_t)strlen(base),
+        .parent_inode = parent_inode,
+        .buffer_size = 0x100000,  // 1MB buffer
+        .is_folder = false
+    };
+    
+    int32_t retcode = sys_exec(&req);
+    
+    if (retcode == 0) {
+        sys_puts("exec: process created successfully\n", 36, COLOR_TXT);
+    } else {
+        sys_puts("exec: failed with code ", 24, COLOR_TXT);
+        sys_putchar('0' + (retcode & 0xF), COLOR_TXT);
+        sys_putchar('\n', COLOR_TXT);
+    }
+}
+
+static void cmd_ps(int argc, char* argv[]) {
+    (void)argc; (void)argv;
+    
+    ProcessInfo proc_list[16];  // Max 16 processes
+    int32_t count = sys_ps(proc_list, 16);
+    
+    if (count <= 0) {
+        sys_puts("ps: no processes found\n", 23, COLOR_TXT);
+        return;
+    }
+    
+    // Print header
+    sys_puts("PID  STATE    NAME\n", 18, COLOR_TXT);
+    sys_puts("---  -------  --------\n", 24, COLOR_TXT);
+    
+    for (int i = 0; i < count; i++) {
+        // Print PID (2 digits)
+        if (proc_list[i].pid < 10) {
+            sys_putchar(' ', COLOR_TXT);
+        }
+        sys_putchar('0' + (proc_list[i].pid / 10), COLOR_TXT);
+        sys_putchar('0' + (proc_list[i].pid % 10), COLOR_TXT);
+        sys_puts("   ", 3, COLOR_TXT);
+        
+        // Print state
+        if (proc_list[i].state == PROCESS_RUNNING) {
+            sys_puts("RUNNING ", 8, COLOR_TXT);
+        } else if (proc_list[i].state == PROCESS_READY) {
+            sys_puts("READY   ", 8, COLOR_TXT);
+        } else {
+            sys_puts("TERM    ", 8, COLOR_TXT);
+        }
+        sys_puts(" ", 1, COLOR_TXT);
+        
+        // Print name (directly from array, already copied from kernel space)
+        if (proc_list[i].name_len > 0) {
+            uint32_t len = proc_list[i].name_len;
+            if (len > 8) len = 8;
+            sys_puts(proc_list[i].name, len, COLOR_TXT);
+        }
+        sys_putchar('\n', COLOR_TXT);
+    }
+}
+
+static void cmd_kill(int argc, char* argv[]) {
+    if (argc < 2) {
+        sys_puts("kill: missing PID\n", 18, COLOR_TXT);
+        return;
+    }
+    
+    // Simple PID parsing (assumes decimal number)
+    uint32_t pid = 0;
+    for (char* p = argv[1]; *p; p++) {
+        if (*p >= '0' && *p <= '9') {
+            pid = pid * 10 + (*p - '0');
+        } else {
+            sys_puts("kill: invalid PID\n", 18, COLOR_TXT);
+            return;
+        }
+    }
+    
+    int32_t result = sys_kill(pid);
+    
+    if (result == 0) {
+        sys_puts("kill: process ", 14, COLOR_TXT);
+        sys_puts(argv[1], strlen(argv[1]), COLOR_TXT);
+        sys_puts(" terminated\n", 12, COLOR_TXT);
+    } else {
+        sys_puts("kill: process not found or cannot be killed\n", 45, COLOR_TXT);
+    }
+}
+
 static void cmd_exit(int argc, char* argv[]) {
     (void)argc; (void)argv;
     sys_puts("bye\n", 5, COLOR_TXT);
-    while(1) {}
+    sys_exit();  // Use syscall to properly exit
+    while(1) {}  // Fallback in case syscall doesn't work
 }
 
 static int parse_command(char* line, char* argv[], int maxargs) {
@@ -496,6 +663,9 @@ static void execute_command(int argc, char* argv[]) {
     else if (strcmp(argv[0], "cd") == 0) cmd_cd(argc, argv);
     else if (strcmp(argv[0], "cat") == 0) cmd_cat(argc, argv);
     else if (strcmp(argv[0], "mkdir") == 0) cmd_mkdir(argc, argv);
+    else if (strcmp(argv[0], "exec") == 0) cmd_exec(argc, argv);
+    else if (strcmp(argv[0], "ps") == 0) cmd_ps(argc, argv);
+    else if (strcmp(argv[0], "kill") == 0) cmd_kill(argc, argv);
     else if (strcmp(argv[0], "clear") == 0) for (int i = 0; i < 40; i++) sys_putchar('\n', COLOR_TXT);
     else if (strcmp(argv[0], "exit") == 0) cmd_exit(argc, argv);
     else { sys_puts("undefined command: ", 19, COLOR_TXT); sys_puts(argv[0], strlen(argv[0]), COLOR_TXT); sys_putchar('\n', COLOR_TXT); }

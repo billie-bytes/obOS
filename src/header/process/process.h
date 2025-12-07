@@ -83,7 +83,8 @@ struct ProcessControlBlock {
     struct {
         uint32_t pid;
         enum PROCESS_STATE state;
-        char name[10];
+        char name[PROCESS_NAME_LENGTH_MAX];
+        uint8_t name_len;
     } metadata;
 
     struct Context context;
@@ -126,5 +127,23 @@ int32_t process_create_user_process(struct EXT2DriverRequest request);
 // uint32_t ceil_div(uint32_t a, uint32_t b);
 
 // uint32_t process_generate_new_pid();
+
+/**
+ * Destroy process then release page directory and process control block
+ * 
+ * @param pid Process ID to delete
+ * @return    True if process destruction success
+ */
+bool process_destroy(uint32_t pid);
+
+typedef struct
+{
+    uint32_t pid;
+    PROCESS_STATE state;
+    char name[32];  // Array instead of pointer to avoid kernel-user space issue
+    uint8_t name_len;
+} ProcessInfo;
+
+int32_t get_process_info(ProcessInfo *buffer, uint32_t bufsize);
 
 #endif
