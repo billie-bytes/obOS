@@ -170,6 +170,7 @@ void syscall(struct InterruptFrame frame) {
                     pcb->metadata.state = PROCESS_TERMINATED;
                     process_manager_state._process_used[pcb->metadata.pid] = false;
                     process_manager_state.active_process_count--;
+                    scheduler_switch_to_next_process();
                 }
             break;
         case 16:
@@ -232,8 +233,4 @@ void activate_timer_interrupt(void) {
     __asm__ volatile("sti");
 
 }
-
-
-
-
 

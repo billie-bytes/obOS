@@ -122,8 +122,9 @@ insert-clock: inserter user-clock
 user-hello:
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/crt0.s -o crt0.o
 	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/user-hello.c -o user-hello.o
+	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/string.c -o string.o
 	@$(LIN) -T $(SOURCE_FOLDER)/user-linker.ld -melf_i386 --oformat=binary \
-		crt0.o user-hello.o -o $(OUTPUT_FOLDER)/hello
+		crt0.o user-hello.o string.o -o $(OUTPUT_FOLDER)/hello
 	@echo Linking object hello object files and generate flat binary...
 	@size --target=binary $(OUTPUT_FOLDER)/hello
 	@rm -f *.o

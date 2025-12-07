@@ -686,23 +686,7 @@ static void cmd_exec(int argc, char* argv[]) {
         .is_folder = false
     };
     
-    int32_t retcode = sys_exec(&req);
-    
-    if (retcode == 0) {
-        sys_puts("exec: process created successfully\n", 36, COLOR_TXT);
-    } else {
-        sys_puts("exec: failed with code ", 24, COLOR_TXT);
-        // Print decimal number properly
-        if (retcode < 0) {
-            sys_putchar('-', COLOR_TXT);
-            retcode = -retcode;
-        }
-        if (retcode >= 10) {
-            sys_putchar('0' + (retcode / 10), COLOR_TXT);
-        }
-        sys_putchar('0' + (retcode % 10), COLOR_TXT);
-        sys_putchar('\n', COLOR_TXT);
-    }
+    sys_exec(&req);
 }
 
 static void cmd_ps(int argc, char* argv[]) {
