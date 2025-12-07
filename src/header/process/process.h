@@ -67,9 +67,9 @@ struct Context {
 
 typedef enum PROCESS_STATE {
     // TODO: Add process states
-    PROCESS_READY,
+    PROCESS_TERMINATED,
     PROCESS_RUNNING,
-    PROCESS_TERMINATED
+    PROCESS_READY,
 } PROCESS_STATE;
 
 /**
@@ -121,10 +121,10 @@ struct ProcessControlBlock* process_get_current_running_pcb_pointer(void);
  */
 int32_t process_create_user_process(struct EXT2DriverRequest request);
 
-uint32_t process_list_get_inactive_index();
+// uint32_t process_list_get_inactive_index();
 
-uint32_t ceil_div(uint32_t a, uint32_t b);
+// uint32_t ceil_div(uint32_t a, uint32_t b);
 
-uint32_t process_generate_new_pid();
+// uint32_t process_generate_new_pid();
 
 #endif
