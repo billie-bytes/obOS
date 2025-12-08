@@ -41,6 +41,7 @@ void kernel_setup(void) {
     process_create_user_process(request);
     scheduler_init();
     scheduler_switch_to_next_process();
+
 }
 
 

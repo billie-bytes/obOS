@@ -48,4 +48,5 @@ void framebuffer_clear(void);
 void putchar(char c, uint8_t color);
 
 void puts(const char *str, uint32_t count, uint32_t color);
+
 #endif

@@ -38,6 +38,15 @@ struct EXT2DriverRequest {
 uint32_t current_directory_inode = 2;
 char current_path[256] = "/";
 
+// Directory traversal helper types used by autocomplete and path helpers
+struct DirectoryTraversal {
+    uint8_t* base;
+    uint32_t size;
+    uint32_t off;
+};
+
+static bool dirwalk_next(struct DirectoryTraversal* it, struct EXT2DirectoryEntry* out_entry, char* name_buf, uint16_t name_buf_sz);
+
 void syscall_do(uint32_t eax, uint32_t ebx, uint32_t ecx, uint32_t edx) {
     __asm__ volatile("mov %0, %%ebx" : : "r"(ebx));
     __asm__ volatile("mov %0, %%ecx" : : "r"(ecx));
@@ -56,6 +65,10 @@ static inline void sys_puts(const char *s, uint32_t len, uint8_t color) {
 
 static inline void sys_getchar(char *out) {
     syscall_do(4u, (uint32_t)out, 0, 0);
+}
+
+static inline char read_key_blocking(void) {
+    char k = 0; do { sys_getchar(&k); } while (!k); return k;
 }
 
 static inline void sys_keyboard_activate(void) {
@@ -90,18 +103,185 @@ static inline int8_t fs_delete(struct EXT2DriverRequest* r, int8_t* rc) {
     return *rc;
 }
 
-extern size_t strlen(const char *str);
+// Syscall 10: Process exit
+static inline void sys_exit(void) {
+    syscall_do(10, 0, 0, 0);
+}
+
+// Syscall 11: Create process (exec)
+static inline int32_t sys_exec(struct EXT2DriverRequest* req) {
+    int32_t retval;
+    syscall_do(11, (uint32_t)req, 0, 0);
+    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
+    return retval;
+}
+
+// Syscall 12: Kill process by PID
+static inline int32_t sys_kill(uint32_t pid) {
+    int32_t retval;
+    syscall_do(12, pid, 0, 0);
+    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
+    return retval;
+}
+
+// Syscall 13: Get process info (ps)
+typedef enum {
+    PROCESS_TERMINATED = 0,
+    PROCESS_RUNNING = 1,
+    PROCESS_READY = 2,
+} PROCESS_STATE;
+
+typedef struct {
+    uint32_t pid;
+    PROCESS_STATE state;
+    char name[32];  // Changed from pointer to array to avoid kernel-user space issue
+    uint8_t name_len;
+} ProcessInfo;
+
+static inline int32_t sys_ps(ProcessInfo *buffer, uint32_t bufsize) {
+    int32_t count;
+    syscall_do(13, (uint32_t)buffer, bufsize, 0);
+    __asm__ volatile("mov %%eax, %0" : "=r"(count));
+    return count;
+}
+
 // size_t strlen(const char *str) {
 //     size_t len = 0;
 //     while (str[len] != '\0') len++;
 //     return len;
 // }
-
+extern size_t strlen(const char *str);
 static void print_prompt(void) {
     sys_puts("jOSh@OS-IF2230", 14, COLOR_PROMPT_USER);
     sys_puts(":", 1, COLOR_PROMPT_SEP);
     sys_puts(current_path, strlen(current_path), COLOR_PROMPT_USER);
     sys_puts("$ ", 2, COLOR_PROMPT_SEP);
+}
+// history
+#define HIST_MAX 32
+static char history[HIST_MAX][MAX_INPUT_LEN];
+static int  hist_len[HIST_MAX];
+static int  hist_head = 0;   // next slot to write
+static int  hist_count = 0;  // number of stored entries
+static int  hist_nav = -1;   // -1 means not navigating, otherwise index 0..hist_count-1
+
+static void history_add(const char* line, int len){
+    if (len <= 0) return;
+    if (len >= MAX_INPUT_LEN) len = MAX_INPUT_LEN-1;
+    for (int i=0;i<len;i++) history[hist_head][i] = line[i];
+    history[hist_head][len] = 0;
+    hist_len[hist_head] = len;
+    hist_head = (hist_head + 1) % HIST_MAX;
+    if (hist_count < HIST_MAX) hist_count++; 
+    hist_nav = -1;
+}
+
+static int history_get(int idx, char* out){
+    if (idx < 0 || idx >= hist_count) return 0;
+    int oldest = (hist_head - hist_count + HIST_MAX) % HIST_MAX;
+    int slot = (oldest + idx) % HIST_MAX;
+    int len = hist_len[slot];
+    for (int i=0;i<len;i++) out[i] = history[slot][i];
+    out[len] = 0;
+    return len;
+}
+
+// Clear current 
+static void erase_input_line(int len){
+    for (int i=0;i<len;i++) { sys_putchar('\b', COLOR_INPUT); sys_putchar(' ', COLOR_INPUT); sys_putchar('\b', COLOR_INPUT); }
+}
+
+static int autocomplete(char* buf, int cur_len){
+    // Find last token in buf
+    int start = 0;
+    for (int i=cur_len-1;i>=0;i--) { if (buf[i]==' '||buf[i]=='\t'){ start = i+1; break; } }
+    const char* prefix = buf + start;
+    int prefix_len = cur_len - start;
+
+    // Detect if first word (command) or argument
+    bool is_first_word = true;
+    for (int i = 0; i < start; i++) {
+        if (buf[i] != ' ' && buf[i] != '\t') { is_first_word = false; break; }
+    }
+
+    // Collect matches
+    uint8_t dirbuf[DIRBUF_BYTES];
+    int matches = 0;
+    char match_name[256] = {0};
+    uint8_t match_types[HIST_MAX];
+    char match_list[HIST_MAX][256];
+
+    if (is_first_word) {
+        const char* builtins[] = { "ls","cd","pwd","cat","mkdir","exec","ps","kill","clear","help","exit" };
+        int ncmd = (int)(sizeof(builtins)/sizeof(builtins[0]));
+        for (int i=0;i<ncmd;i++) {
+            if (prefix_len == 0 || strncmp(builtins[i], prefix, (size_t)prefix_len) == 0) {
+                if (matches < HIST_MAX) {
+                    strncpy(match_list[matches], builtins[i], sizeof(match_list[matches]));
+                    match_types[matches] = EXT2_FT_REG_FILE; // treat as command
+                    if (matches == 0) strncpy(match_name, builtins[i], sizeof(match_name));
+                    matches++;
+                }
+            }
+        }
+    } else {
+        // Read directory entries of current directory
+        struct EXT2DriverRequest req = {
+            .buf = dirbuf,
+            .buffer_size = sizeof(dirbuf),
+            .parent_inode = current_directory_inode,
+            .name = ".",
+            .name_len = 1,
+            .is_folder = true
+        };
+        int8_t rc = -1;
+        fs_readdir(&req, &rc);
+        if (rc != 0) return 0;
+
+        struct DirectoryTraversal it = { .base = dirbuf, .size = sizeof(dirbuf), .off = 0 };
+        struct EXT2DirectoryEntry e;
+        char nm[256];
+        while (dirwalk_next(&it, &e, nm, sizeof(nm))) {
+            if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0) continue;
+            if (prefix_len == 0 || (int)strncmp(nm, prefix, (size_t)prefix_len) == 0) {
+                if (matches < HIST_MAX) {
+                    strncpy(match_list[matches], nm, sizeof(match_list[matches]));
+                    match_types[matches] = e.file_type;
+                    if (matches == 0) strncpy(match_name, nm, sizeof(match_name));
+                    matches++;
+                }
+            }
+        }
+    }
+
+    if (matches == 0) return 0;
+    if (matches == 1) {
+        // Complete the token
+        int add = (int)strlen(match_name) - prefix_len;
+        for (int i=0;i<add && cur_len < MAX_INPUT_LEN-1;i++) {
+            buf[cur_len++] = match_name[prefix_len + i];
+            sys_putchar(match_name[prefix_len + i], COLOR_INPUT);
+        }
+        // Add a trailing slash for directory args, space otherwise
+        if (!is_first_word) {
+            uint8_t t = match_types[0];
+            if (t == EXT2_FT_DIR && cur_len < MAX_INPUT_LEN-1) { buf[cur_len++] = '/'; sys_putchar('/', COLOR_INPUT); }
+            else if (cur_len < MAX_INPUT_LEN-1) { buf[cur_len++] = ' '; sys_putchar(' ', COLOR_INPUT); }
+        }
+        return cur_len;
+    }
+    // Multiple matches: print newline, list, then reprint prompt + line
+    sys_putchar('\n', COLOR_TXT);
+    for (int i=0;i<matches;i++) {
+        uint8_t color = (!is_first_word && match_types[i] == EXT2_FT_DIR) ? COLOR_DIR : COLOR_TXT;
+        sys_puts(match_list[i], strlen(match_list[i]), color);
+        if (!is_first_word && match_types[i] == EXT2_FT_DIR) sys_putchar('/', COLOR_DIR);
+        sys_putchar(' ', COLOR_TXT);
+    }
+    sys_putchar('\n', COLOR_TXT);
+    print_prompt();
+    sys_puts(buf, cur_len, COLOR_INPUT);
+    return cur_len;
 }
 
 
@@ -204,12 +384,6 @@ extern char* strtok(char *s, const char *delim);
 //     return dstbuf;
 // }
 extern void* memcpy(void* dest, const void* src, size_t n);
-
-struct DirectoryTraversal {
-    uint8_t* base;
-    uint32_t size;
-    uint32_t off;
-};
 
 static bool dirwalk_next(struct DirectoryTraversal* it, struct EXT2DirectoryEntry* out_entry, char* name_buf, uint16_t name_buf_sz) {
     while (it->off + 9 <= it->size) {
@@ -327,11 +501,9 @@ static void cmd_help(int argc, char* argv[]) {
     sys_puts("  pwd\n", 6, COLOR_TXT);
     sys_puts("  cat <FILE>\n", 13, COLOR_TXT);
     sys_puts("  mkdir <DIR>\n", 14, COLOR_TXT);
-    sys_puts("  rm <FILE|DIR>\n", 15, COLOR_TXT);
-    sys_puts("  cp <SRC> <DST>\n", 16, COLOR_TXT);
-    sys_puts("  mv <SRC> <DST>\n", 16, COLOR_TXT);
-    sys_puts("  find <NAME>\n", 14, COLOR_TXT);
-    sys_puts("  grep <PATTERN> <FILE>\n", 24, COLOR_TXT);
+    sys_puts("  exec <PROGRAM>\n", 17, COLOR_TXT);
+    sys_puts("  ps\n", 5, COLOR_TXT);
+    sys_puts("  kill <PID>\n", 13, COLOR_TXT);
     sys_puts("  clear\n", 8, COLOR_TXT);
     sys_puts("  help\n", 7, COLOR_TXT);
     sys_puts("  exit\n", 7, COLOR_TXT);
@@ -479,298 +651,113 @@ static void cmd_mkdir(int argc, char* argv[]) {
     sys_putchar('\n', COLOR_TXT);
 }
 
-static void cmd_rm(int argc, char* argv[]) {
-    if (argc < 2) { sys_puts("rm: missing operand\n", 20, COLOR_TXT); return; }
+static void cmd_exec(int argc, char* argv[]) {
+    if (argc < 2) { 
+        sys_puts("exec: missing program name\n", 28, COLOR_TXT); 
+        return; 
+    }
+    
+    // Parse path to get parent directory and filename
     char parent_path[MAX_LINE], base[MAX_LINE];
     split_path(argv[1], parent_path, base);
-    if (base[0] == 0) { sys_puts("rm: invalid name\n", 17, COLOR_TXT); return; }
     
     uint32_t parent_inode;
     if (argv[1][0] == '/') {
         if (strcmp(parent_path, "/") == 0) parent_inode = 2;
-        else if (!resolve_path(parent_path, &parent_inode)) { sys_puts("rm: parent not found\n", 21, COLOR_TXT); return; }
+        else if (!resolve_path(parent_path, &parent_inode)) {
+            sys_puts("exec: parent not found\n", 23, COLOR_TXT);
+            return;
+        }
     } else {
         if (strcmp(parent_path, ".") == 0) parent_inode = current_directory_inode;
-        else if (!resolve_path(parent_path, &parent_inode)) { sys_puts("rm: parent not found\n", 21, COLOR_TXT); return; }
+        else if (!resolve_path(parent_path, &parent_inode)) {
+            sys_puts("exec: parent not found\n", 23, COLOR_TXT);
+            return;
+        }
     }
     
+    // Create process request
     struct EXT2DriverRequest req = {
-        .buf = 0,
+        .buf = (uint8_t*) 0,  // Kernel will load at address 0
         .name = base,
         .name_len = (uint8_t)strlen(base),
         .parent_inode = parent_inode,
-        .buffer_size = 0,
+        .buffer_size = 0x100000,  // 1MB buffer
         .is_folder = false
     };
-    int8_t rc = -1;
-    fs_delete(&req, &rc);
-    if (rc != 0) {
-        sys_puts("rm: error code ", 15, COLOR_TXT);
-        sys_putchar('0' + rc, COLOR_TXT);
-        sys_putchar('\n', COLOR_TXT);
-    }
+    
+    sys_exec(&req);
 }
 
-static void cmd_cp(int argc, char* argv[]) {
-    if (argc < 3) { sys_puts("cp: missing operand\n", 20, COLOR_TXT); return; }
+static void cmd_ps(int argc, char* argv[]) {
+    (void)argc; (void)argv;
     
-    char src_parent[MAX_LINE], src_base[MAX_LINE];
-    split_path(argv[1], src_parent, src_base);
-    if (src_base[0] == 0) { sys_puts("cp: invalid source name\n", 24, COLOR_TXT); return; }
+    ProcessInfo proc_list[16];  // Max 16 processes
+    int32_t count = sys_ps(proc_list, 16);
     
-    uint32_t src_parent_inode;
-    if (argv[1][0] == '/') {
-        if (strcmp(src_parent, "/") == 0) src_parent_inode = 2;
-        else if (!resolve_path(src_parent, &src_parent_inode)) { sys_puts("cp: source parent not found\n", 28, COLOR_TXT); return; }
-    } else {
-        if (strcmp(src_parent, ".") == 0) src_parent_inode = current_directory_inode;
-        else if (!resolve_path(src_parent, &src_parent_inode)) { sys_puts("cp: source parent not found\n", 28, COLOR_TXT); return; }
-    }
-    
-    uint8_t filebuf[4096];
-    struct EXT2DriverRequest req_read = {
-        .buf = filebuf,
-        .name = src_base,
-        .name_len = (uint8_t)strlen(src_base),
-        .parent_inode = src_parent_inode,
-        .buffer_size = sizeof(filebuf),
-        .is_folder = false
-    };
-    int8_t rc = -1;
-    rc = fs_readfile(&req_read, &rc);
-    if (rc != 0) {
-        sys_puts("cp: cannot read source\n", 23, COLOR_TXT);
+    if (count <= 0) {
+        sys_puts("ps: no processes found\n", 23, COLOR_TXT);
         return;
     }
     
-    char dst_parent[MAX_LINE], dst_base[MAX_LINE];
-    split_path(argv[2], dst_parent, dst_base);
-    if (dst_base[0] == 0) { sys_puts("cp: invalid dest name\n", 22, COLOR_TXT); return; }
+    // Print header
+    sys_puts("PID  STATE    NAME\n", 18, COLOR_TXT);
+    sys_puts("---  -------  --------\n", 24, COLOR_TXT);
     
-    uint32_t dst_parent_inode;
-    if (argv[2][0] == '/') {
-        if (strcmp(dst_parent, "/") == 0) dst_parent_inode = 2;
-        else if (!resolve_path(dst_parent, &dst_parent_inode)) { sys_puts("cp: dest parent not found\n", 26, COLOR_TXT); return; }
-    } else {
-        if (strcmp(dst_parent, ".") == 0) dst_parent_inode = current_directory_inode;
-        else if (!resolve_path(dst_parent, &dst_parent_inode)) { sys_puts("cp: dest parent not found\n", 26, COLOR_TXT); return; }
-    }
-    
-    struct EXT2DriverRequest req_write = {
-        .buf = filebuf,
-        .name = dst_base,
-        .name_len = (uint8_t)strlen(dst_base),
-        .parent_inode = dst_parent_inode,
-        .buffer_size = 4096,
-        .is_folder = false
-    };
-    rc = -1;
-    fs_write(&req_write, &rc);
-    if (rc != 0) {
-        sys_puts("cp: error code ", 15, COLOR_TXT);
-        sys_putchar('0' + rc, COLOR_TXT);
-        sys_putchar('\n', COLOR_TXT);
-    }
-}
-
-static void cmd_mv(int argc, char* argv[]) {
-    if (argc < 3) { sys_puts("mv: missing operand\n", 20, COLOR_TXT); return; }
-    
-    char src_parent[MAX_LINE], src_base[MAX_LINE];
-    split_path(argv[1], src_parent, src_base);
-    if (src_base[0] == 0) { sys_puts("mv: invalid source name\n", 24, COLOR_TXT); return; }
-    
-    uint32_t src_parent_inode;
-    if (argv[1][0] == '/') {
-        if (strcmp(src_parent, "/") == 0) src_parent_inode = 2;
-        else if (!resolve_path(src_parent, &src_parent_inode)) { sys_puts("mv: source parent not found\n", 28, COLOR_TXT); return; }
-    } else {
-        if (strcmp(src_parent, ".") == 0) src_parent_inode = current_directory_inode;
-        else if (!resolve_path(src_parent, &src_parent_inode)) { sys_puts("mv: source parent not found\n", 28, COLOR_TXT); return; }
-    }
-    
-    uint8_t filebuf[4096];
-    struct EXT2DriverRequest req_read = {
-        .buf = filebuf,
-        .name = src_base,
-        .name_len = (uint8_t)strlen(src_base),
-        .parent_inode = src_parent_inode,
-        .buffer_size = sizeof(filebuf),
-        .is_folder = false
-    };
-    int8_t rc = -1;
-    rc = fs_readfile(&req_read, &rc);
-    if (rc != 0) {
-        sys_puts("mv: cannot read source\n", 23, COLOR_TXT);
-        return;
-    }
-    
-    char dst_parent[MAX_LINE], dst_base[MAX_LINE];
-    split_path(argv[2], dst_parent, dst_base);
-    if (dst_base[0] == 0) { sys_puts("mv: invalid dest name\n", 22, COLOR_TXT); return; }
-    
-    uint32_t dst_parent_inode;
-    if (argv[2][0] == '/') {
-        if (strcmp(dst_parent, "/") == 0) dst_parent_inode = 2;
-        else if (!resolve_path(dst_parent, &dst_parent_inode)) { sys_puts("mv: dest parent not found\n", 26, COLOR_TXT); return; }
-    } else {
-        if (strcmp(dst_parent, ".") == 0) dst_parent_inode = current_directory_inode;
-        else if (!resolve_path(dst_parent, &dst_parent_inode)) { sys_puts("mv: dest parent not found\n", 26, COLOR_TXT); return; }
-    }
-    
-    struct EXT2DriverRequest req_write = {
-        .buf = filebuf,
-        .name = dst_base,
-        .name_len = (uint8_t)strlen(dst_base),
-        .parent_inode = dst_parent_inode,
-        .buffer_size = 4096,
-        .is_folder = false
-    };
-    rc = -1;
-    fs_write(&req_write, &rc);
-    if (rc != 0) {
-        sys_puts("mv: write error code ", 21, COLOR_TXT);
-        sys_putchar('0' + rc, COLOR_TXT);
-        sys_putchar('\n', COLOR_TXT);
-        return;
-    }
-    
-    struct EXT2DriverRequest req_del = {
-        .buf = 0,
-        .name = src_base,
-        .name_len = (uint8_t)strlen(src_base),
-        .parent_inode = src_parent_inode,
-        .buffer_size = 0,
-        .is_folder = false
-    };
-    rc = -1;
-    fs_delete(&req_del, &rc);
-    if (rc != 0) {
-        sys_puts("mv: delete error code ", 22, COLOR_TXT);
-        sys_putchar('0' + rc, COLOR_TXT);
-        sys_putchar('\n', COLOR_TXT);
-    }
-}
-
-static void cmd_find_recursive(uint32_t dir_inode, const char* target, int depth) {
-    if (depth > 10) return;
-    
-    uint8_t dirbuf[DIRBUF_BYTES];
-    if (fetch_dir_table(dir_inode, dirbuf, sizeof(dirbuf)) != 0) return;
-    
-    struct DirectoryTraversal it = { .base = dirbuf, .size = sizeof(dirbuf), .off = 0 };
-    struct EXT2DirectoryEntry e;
-    char nm[256];
-    
-    while (dirwalk_next(&it, &e, nm, sizeof(nm))) {
-        if (strcmp(nm, target) == 0) {
-            if (current_path[0] && strcmp(current_path, "/") != 0) {
-                sys_puts(current_path, strlen(current_path), COLOR_TXT);
-                sys_putchar('/', COLOR_TXT);
-            }
-            sys_puts(nm, strlen(nm), COLOR_TXT);
-            sys_putchar('\n', COLOR_TXT);
+    for (int i = 0; i < count; i++) {
+        // Print PID (2 digits)
+        if (proc_list[i].pid < 10) {
+            sys_putchar(' ', COLOR_TXT);
         }
+        sys_putchar('0' + (proc_list[i].pid / 10), COLOR_TXT);
+        sys_putchar('0' + (proc_list[i].pid % 10), COLOR_TXT);
+        sys_puts("   ", 3, COLOR_TXT);
         
-        if (e.file_type == EXT2_FT_DIR && strcmp(nm, ".") != 0 && strcmp(nm, "..") != 0) {
-            char old_path[256];
-            strcpy(old_path, current_path);
-            if (strcmp(current_path, "/") != 0) strcat(current_path, "/");
-            strcat(current_path, nm);
-            cmd_find_recursive(e.inode, target, depth + 1);
-            strcpy(current_path, old_path);
+        // Print state
+        if (proc_list[i].state == PROCESS_RUNNING) {
+            sys_puts("RUNNING ", 8, COLOR_TXT);
+        } else if (proc_list[i].state == PROCESS_READY) {
+            sys_puts("READY   ", 8, COLOR_TXT);
+        } else {
+            sys_puts("TERM    ", 8, COLOR_TXT);
         }
+        sys_puts(" ", 1, COLOR_TXT);
+        
+        // Print name (directly from array, already copied from kernel space)
+        if (proc_list[i].name_len > 0) {
+            uint32_t len = proc_list[i].name_len;
+            if (len > 8) len = 8;
+            sys_puts(proc_list[i].name, len, COLOR_TXT);
+        }
+        sys_putchar('\n', COLOR_TXT);
     }
 }
 
-static void cmd_find(int argc, char* argv[]) {
-    if (argc < 2) { sys_puts("find: missing pattern\n", 22, COLOR_TXT); return; }
-    
-    char saved_path[256];
-    strcpy(saved_path, current_path);
-    cmd_find_recursive(2, argv[1], 0);
-    strcpy(current_path, saved_path);
-}
-
-static void cmd_grep(int argc, char* argv[]) {
-    if (argc < 3) { sys_puts("grep: missing operand\n", 22, COLOR_TXT); return; }
-    
-    const char* pattern = argv[1];
-    const char* filename = argv[2];
-    
-    char parent_path[MAX_LINE], base[MAX_LINE];
-    split_path(filename, parent_path, base);
-    if (base[0] == 0) { sys_puts("grep: invalid file name\n", 24, COLOR_TXT); return; }
-    
-    uint32_t parent_inode;
-    if (filename[0] == '/') {
-        if (strcmp(parent_path, "/") == 0) parent_inode = 2;
-        else if (!resolve_path(parent_path, &parent_inode)) { sys_puts("grep: file not found\n", 21, COLOR_TXT); return; }
-    } else {
-        if (strcmp(parent_path, ".") == 0) parent_inode = current_directory_inode;
-        else if (!resolve_path(parent_path, &parent_inode)) { sys_puts("grep: file not found\n", 21, COLOR_TXT); return; }
-    }
-    
-    uint8_t filebuf[4096];
-    struct EXT2DriverRequest req = {
-        .buf = filebuf,
-        .name = base,
-        .name_len = (uint8_t)strlen(base),
-        .parent_inode = parent_inode,
-        .buffer_size = sizeof(filebuf),
-        .is_folder = false
-    };
-    int8_t rc = -1;
-    rc = fs_readfile(&req, &rc);
-    if (rc != 0) {
-        sys_puts("grep: cannot read file\n", 23, COLOR_TXT);
+static void cmd_kill(int argc, char* argv[]) {
+    if (argc < 2) {
+        sys_puts("kill: missing PID\n", 18, COLOR_TXT);
         return;
     }
     
-    uint32_t line_start = 0;
-    uint32_t pattern_len = strlen(pattern);
-    for (uint32_t i = 0; i < 4096; i++) {
-        char c = (char)filebuf[i];
-        if (c == 0) {
-            if (i > line_start) {
-                uint32_t j;
-                for (j = line_start; j <= i - pattern_len; j++) {
-                    uint8_t match = 1;
-                    for (uint32_t k = 0; k < pattern_len; k++) {
-                        if ((char)filebuf[j + k] != pattern[k]) { match = 0; break; }
-                    }
-                    if (match) {
-                        for (uint32_t k = line_start; k < i; k++) {
-                            putc_color((char)filebuf[k], COLOR_TXT);
-                        }
-                        sys_putchar('\n', COLOR_TXT);
-                        break;
-                    }
-                }
-            }
-            break;
+    // Simple PID parsing (assumes decimal number)
+    uint32_t pid = 0;
+    for (char* p = argv[1]; *p; p++) {
+        if (*p >= '0' && *p <= '9') {
+            pid = pid * 10 + (*p - '0');
+        } else {
+            sys_puts("kill: invalid PID\n", 18, COLOR_TXT);
+            return;
         }
-        
-        if (c == '\n') {
-            uint32_t line_len = i - line_start;
-            if (line_len >= pattern_len) {
-                uint32_t j;
-                for (j = line_start; j <= i - pattern_len; j++) {
-                    uint8_t match = 1;
-                    for (uint32_t k = 0; k < pattern_len; k++) {
-                        if ((char)filebuf[j + k] != pattern[k]) { match = 0; break; }
-                    }
-                    if (match) {
-                        for (uint32_t k = line_start; k < i; k++) {
-                            putc_color((char)filebuf[k], COLOR_TXT);
-                        }
-                        sys_putchar('\n', COLOR_TXT);
-                        break;
-                    }
-                }
-            }
-            line_start = i + 1;
-        }
+    }
+    
+    int32_t result = sys_kill(pid);
+    
+    if (result == 0) {
+        sys_puts("kill: process ", 14, COLOR_TXT);
+        sys_puts(argv[1], strlen(argv[1]), COLOR_TXT);
+        sys_puts(" terminated\n", 12, COLOR_TXT);
+    } else {
+        sys_puts("kill: process not found or cannot be killed\n", 45, COLOR_TXT);
     }
 }
 
@@ -780,10 +767,6 @@ static void cmd_exit(int argc, char* argv[]) {
     while(1) {}
 }
 
-static void cmd_clear(int argc, char* argv[]) {
-    (void)argc; (void)argv;
-    for (int i = 0; i < 25; i++) sys_putchar('\n', COLOR_TXT);
-}
 
 static int parse_command(char* line, char* argv[], int maxargs) {
     int n = 0;
@@ -807,12 +790,10 @@ static void execute_command(int argc, char* argv[]) {
     else if (strcmp(argv[0], "cd") == 0) cmd_cd(argc, argv);
     else if (strcmp(argv[0], "cat") == 0) cmd_cat(argc, argv);
     else if (strcmp(argv[0], "mkdir") == 0) cmd_mkdir(argc, argv);
-    else if (strcmp(argv[0], "rm") == 0) cmd_rm(argc, argv);
-    else if (strcmp(argv[0], "cp") == 0) cmd_cp(argc, argv);
-    else if (strcmp(argv[0], "mv") == 0) cmd_mv(argc, argv);
-    else if (strcmp(argv[0], "find") == 0) cmd_find(argc, argv);
-    else if (strcmp(argv[0], "grep") == 0) cmd_grep(argc, argv);
-    else if (strcmp(argv[0], "clear") == 0) cmd_clear(argc, argv);
+    else if (strcmp(argv[0], "exec") == 0) cmd_exec(argc, argv);
+    else if (strcmp(argv[0], "ps") == 0) cmd_ps(argc, argv);
+    else if (strcmp(argv[0], "kill") == 0) cmd_kill(argc, argv);
+    else if (strcmp(argv[0], "clear") == 0) { __asm__ volatile("mov $8, %eax; int $0x30"); }
     else if (strcmp(argv[0], "exit") == 0) cmd_exit(argc, argv);
     else { sys_puts("undefined command: ", 19, COLOR_TXT); sys_puts(argv[0], strlen(argv[0]), COLOR_TXT); sys_putchar('\n', COLOR_TXT); }
 }
@@ -830,6 +811,69 @@ int main(void) {
         char c = 0;
         sys_getchar(&c);
         if (!c) continue;
+        // ANSI escape sequence for Up/Down (ESC [ A/B)
+        if (c == 0x1B) {
+            char b1 = read_key_blocking();
+            if (b1 == '[') {
+                char b2 = read_key_blocking();
+                if (b2 == 'A' && hist_count > 0) {
+                    if (hist_nav < 0) hist_nav = hist_count - 1; else if (hist_nav > 0) hist_nav--;
+                    char tmp[MAX_INPUT_LEN]; int hlen = history_get(hist_nav, tmp);
+                    erase_input_line(len);
+                    {
+                        for (int i=0;i<hlen;i++) line[i] = tmp[i];
+                        len = hlen;
+                        line[len] = 0;
+                        sys_puts(line, len, COLOR_INPUT);
+                    }
+                    continue;
+                }
+                if (b2 == 'B' && hist_count > 0) {
+                    if (hist_nav >= 0) {
+                        hist_nav++;
+                    }
+                    if (hist_nav >= hist_count) {
+                        hist_nav = -1;
+                    }
+                    erase_input_line(len);
+                    if (hist_nav >= 0) { char tmp[MAX_INPUT_LEN]; int hlen = history_get(hist_nav, tmp); for (int i=0;i<hlen;i++) line[i] = tmp[i]; len = hlen; line[len] = 0; sys_puts(line, len, COLOR_INPUT); }
+                    else { len = 0; line[0] = 0; }
+                    continue;
+                }
+                continue;
+            }
+            continue;
+        }
+        if ((unsigned char)c == 0x80 /*KEY_UP*/ && hist_count > 0) {
+            if (hist_nav < 0) hist_nav = hist_count - 1; else if (hist_nav > 0) hist_nav--;
+            char tmp[MAX_INPUT_LEN]; int hlen = history_get(hist_nav, tmp);
+            erase_input_line(len);
+            for (int i=0;i<hlen;i++) line[i] = tmp[i];
+            len = hlen; line[len] = 0;
+            sys_puts(line, len, COLOR_INPUT);
+            continue;
+        }
+        if ((unsigned char)c == 0x81 /*KEY_DOWN*/ && hist_count > 0) {
+            if (hist_nav >= 0) {
+                hist_nav++;
+            }
+            if (hist_nav >= hist_count) {
+                hist_nav = -1;
+            }
+            // -1 means empty current line
+            erase_input_line(len);
+            if (hist_nav >= 0) { char tmp[MAX_INPUT_LEN]; int hlen = history_get(hist_nav, tmp);
+                {
+                    for (int i=0;i<hlen;i++) line[i] = tmp[i];
+                    len = hlen;
+                    line[len]=0;
+                    sys_puts(line, len, COLOR_INPUT);
+                }
+            } else { len = 0; line[0]=0; }
+            continue;
+        }
+        // Tab autocomplete
+        if (c == '\t') { len = autocomplete(line, len); hist_nav = -1; continue; }
 
         if (c == '\b' || c == 127) {
             if (len > 0) {
@@ -845,7 +889,7 @@ int main(void) {
             sys_putchar('\n', COLOR_INPUT);
             line[len] = 0;
             argc = parse_command(line, argv, MAX_ARGS);
-            if (argc > 0) execute_command(argc, argv);
+            if (argc > 0) { execute_command(argc, argv); history_add(line, len); }
             len = 0;
             print_prompt();
             continue;
@@ -861,6 +905,7 @@ int main(void) {
         if (c >= 32 && c <= 126 && len < MAX_INPUT_LEN - 1) {
             sys_putchar(c, COLOR_INPUT);
             line[len++] = c;
+            hist_nav = -1;
         }
     }
 

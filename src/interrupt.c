@@ -6,6 +6,8 @@
 #include "header/filesystem/ext2.h"
 #include "header/text/framebuffer.h"
 #include "header/scheduler/scheduler.h"
+#include "header/process/process.h"
+#include "header/cmos/cmos.h"
 
 struct TSSEntry _interrupt_tss_entry = {
     .ss0  = GDT_KERNEL_DATA_SEGMENT_SELECTOR,
@@ -75,6 +77,13 @@ void set_tss_kernel_current_stack(void) {
     _interrupt_tss_entry.esp0 = stack_ptr + 8; 
 }
 
+extern uint64_t scheduler_get_ticks(void);
+
+static inline uint32_t ms_to_ticks(uint32_t ms) {
+    uint32_t prod = ms * (uint32_t)PIT_TIMER_FREQUENCY;
+    return (prod + 999u) / 1000u;
+}
+
 void syscall(struct InterruptFrame frame) {
     switch (frame.cpu.general.eax) {
         case 0:
@@ -135,6 +144,79 @@ void syscall(struct InterruptFrame frame) {
         case 7: 
             keyboard_state_activate();
             break;
+        case 8:
+        /* Clear screen */
+            framebuffer_clear();
+            break;
+
+        case 9:
+        /* Sleep */
+            {
+                struct ProcessControlBlock *pcb = process_get_current_running_pcb_pointer();
+                if (pcb != NULL) {
+                    uint64_t now = scheduler_get_ticks();
+                    uint32_t ms = (uint32_t)frame.cpu.general.ebx;
+                    uint32_t add_ticks = ms_to_ticks(ms);
+                    pcb->metadata.wake_tick = now + (uint64_t)add_ticks;
+                    pcb->metadata.state = PROCESS_SLEEPING;
+                    scheduler_switch_to_next_process();
+                }
+            }
+            break;
+        case 10:
+        /* Process exit - terminate current process */
+            struct ProcessControlBlock *pcb = process_get_current_running_pcb_pointer();
+                if (pcb != NULL){
+                    pcb->metadata.state = PROCESS_TERMINATED;
+                    process_manager_state._process_used[pcb->metadata.pid] = false;
+                    process_manager_state.active_process_count--;
+                    scheduler_switch_to_next_process();
+                }
+            break;
+        case 16:
+        /* Set cursor position: ebx=row, ecx=col */
+            framebuffer_set_cursor((uint8_t)frame.cpu.general.ebx, (uint8_t)frame.cpu.general.ecx);
+            break;
+        case 17:
+        /* Get cursor position: ebx=ptr_row, ecx=ptr_col */
+            if (frame.cpu.general.ebx && frame.cpu.general.ecx) {
+                
+            }
+            break;
+        case 11:
+        /* Create new user process */
+            struct EXT2DriverRequest *req = (struct EXT2DriverRequest *)frame.cpu.general.ebx;
+            if (req == NULL) {
+                frame.cpu.general.eax = -1;
+            } else {
+                frame.cpu.general.eax = process_create_user_process(*req);
+            }
+            break;
+        case 12:
+        /* Destroy process by pid */    
+            frame.cpu.general.eax = process_destroy(frame.cpu.general.ebx) ? 0 : -1;
+            break;
+        case 13:
+        /* Get process info */
+            // ebx = pointer to ProcessInfo
+            // ecx = size of ProcessInfo
+            // eax = number of process info written
+            frame.cpu.general.eax = get_process_info(
+                (ProcessInfo *)frame.cpu.general.ebx,
+                frame.cpu.general.ecx);
+            break;
+        case 14:
+        /* Get CMOS time data */
+            // ebx = pointer to cmos_reader struct
+            cmos_reader *cmos_buf = (cmos_reader *)frame.cpu.general.ebx;
+            *cmos_buf = get_cmos_data();
+            break;
+        case 15:
+        /* Put char at specific position */
+            // ebx = row, ecx = col, edx = char, edi = color
+            framebuffer_write((uint8_t)frame.cpu.general.ebx, (uint8_t)frame.cpu.general.ecx, 
+                             (char)frame.cpu.general.edx, (uint8_t)frame.cpu.index.edi, 0);
+            break;
     }
 }
 
@@ -151,8 +233,4 @@ void activate_timer_interrupt(void) {
     __asm__ volatile("sti");
 
 }
-
-
-
-
 

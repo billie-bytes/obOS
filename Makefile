@@ -24,6 +24,11 @@ run: all
 	
 all: build
 build: iso
+
+# Insert all user programs into disk
+insert-all: insert-shell insert-clock insert-hello
+	@echo All user programs inserted successfully!
+
 clean:
 	rm -rf *.o *.iso $(OUTPUT_FOLDER)/kernel
 
@@ -46,6 +51,7 @@ kernel:
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/string.c -o $(OUTPUT_FOLDER)/string.o
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/process.c -o $(OUTPUT_FOLDER)/process.o
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/scheduler.c -o $(OUTPUT_FOLDER)/scheduler.o
+	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/cmos.c -o $(OUTPUT_FOLDER)/cmos.o
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/context-switch.s -o $(OUTPUT_FOLDER)/context-switch.o
 
 
@@ -99,3 +105,30 @@ user-shell:
 insert-shell: inserter user-shell
 	@echo Inserting shell into root directory...
 	@cd $(OUTPUT_FOLDER); ./inserter shell 2 $(DISK_NAME).bin
+
+user-clock:
+	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/crt0.s -o crt0.o
+	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/user-clock.c -o user-clock.o
+	@$(LIN) -T $(SOURCE_FOLDER)/user-linker.ld -melf_i386 --oformat=binary \
+		crt0.o user-clock.o -o $(OUTPUT_FOLDER)/clock
+	@echo Linking object clock object files and generate flat binary...
+	@size --target=binary $(OUTPUT_FOLDER)/clock
+	@rm -f *.o
+
+insert-clock: inserter user-clock
+	@echo Inserting clock into root directory...
+	@cd $(OUTPUT_FOLDER); ./inserter clock 2 $(DISK_NAME).bin
+
+user-hello:
+	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/crt0.s -o crt0.o
+	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/user-hello.c -o user-hello.o
+	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/string.c -o string.o
+	@$(LIN) -T $(SOURCE_FOLDER)/user-linker.ld -melf_i386 --oformat=binary \
+		crt0.o user-hello.o string.o -o $(OUTPUT_FOLDER)/hello
+	@echo Linking object hello object files and generate flat binary...
+	@size --target=binary $(OUTPUT_FOLDER)/hello
+	@rm -f *.o
+
+insert-hello: inserter user-hello
+	@echo Inserting hello into root directory...
+	@cd $(OUTPUT_FOLDER); ./inserter hello 2 $(DISK_NAME).bin

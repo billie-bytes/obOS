@@ -42,14 +42,11 @@ static void keyboard_add_buffer(char c){
 
 void get_keyboard_buffer(char *out) {
     if (!out) return;
-    __asm__ volatile("cli");
     if (count > 0) {
         *out = keyboard_buffer[tail];
         tail = (tail + 1) % KEYBOARD_BUFFER_SIZE;
         count--;
-        __asm__ volatile("sti");
     } else {
-        __asm__ volatile("sti");
         *out = 0;
     }
 }
@@ -100,12 +97,12 @@ void keyboard_process_scancode(uint8_t sc) {
     if (ext) {
         ext = false;
         switch (sc) {
-            case EXT_SCANCODE_UP:        keyboard_add_buffer(KEY_UP); break;
-            case EXT_SCANCODE_DOWN:      keyboard_add_buffer(KEY_DOWN); break;
-            case EXT_SCANCODE_LEFT:      keyboard_add_buffer(KEY_LEFT); break;
-            case EXT_SCANCODE_RIGHT:     keyboard_add_buffer(KEY_RIGHT); break;
-            case EXT_SCANCODE_PAGE_UP:   keyboard_add_buffer(KEY_PAGE_UP); break;
-            case EXT_SCANCODE_PAGE_DOWN: keyboard_add_buffer(KEY_PAGE_DOWN); break;
+            case EXT_SCANCODE_UP:        keyboard_add_buffer((char)KEY_UP); break;
+            case EXT_SCANCODE_DOWN:      keyboard_add_buffer((char)KEY_DOWN); break;
+            case EXT_SCANCODE_LEFT:      keyboard_add_buffer((char)KEY_LEFT); break;
+            case EXT_SCANCODE_RIGHT:     keyboard_add_buffer((char)KEY_RIGHT); break;
+            case EXT_SCANCODE_PAGE_UP:   keyboard_add_buffer((char)KEY_PAGE_UP); break;
+            case EXT_SCANCODE_PAGE_DOWN: keyboard_add_buffer((char)KEY_PAGE_DOWN); break;
             default: break;
         }
         return;
