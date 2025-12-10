@@ -676,6 +676,7 @@ static void cmd_help(int argc, char* argv[]) {
     sys_puts("  cd [PATH]\n", 12, COLOR_TXT);
     sys_puts("  pwd\n", 6, COLOR_TXT);
     sys_puts("  cat <FILE>\n", 13, COLOR_TXT);
+    sys_puts("  cat > <FILE>\n", 15, COLOR_TXT);
     sys_puts("  mkdir <DIR>\n", 14, COLOR_TXT);
     sys_puts("  exec <PROGRAM>\n", 17, COLOR_TXT);
     sys_puts("  ps\n", 5, COLOR_TXT);
@@ -761,38 +762,96 @@ static void cmd_cd(int argc, char* argv[]) {
 
 static void cmd_cat(int argc, char* argv[]) {
     if (argc < 2) { sys_puts("cat: no argument\n", 17, COLOR_TXT); return; }
-    char parent_path[MAX_LINE], base[MAX_LINE];
-    split_path(argv[1], parent_path, base);
     uint32_t parent_inode;
-    if (argv[1][0] == '/') {
+    bool write_mode = false;
+    char* target_file = argv[1];
+    if (strcmp(argv[1], ">") == 0) {
+        if (argc < 3) { 
+            sys_puts("cat: missing filename\n", 22, COLOR_TXT); 
+            return; 
+        } 
+        write_mode = true;
+        target_file = argv[2];
+    }
+    char parent_path[MAX_LINE], base[MAX_LINE];
+    split_path(target_file, parent_path, base);
+    if (target_file[0] == '/') {
         if (strcmp(parent_path, "/") == 0) parent_inode = 2;
         else if (!resolve_path(parent_path, &parent_inode)) { sys_puts("cat: parent not found\n", 23, COLOR_TXT); return; }
     } else {
         if (strcmp(parent_path, ".") == 0) parent_inode = current_directory_inode;
         else if (!resolve_path(parent_path, &parent_inode)) { sys_puts("cat: parent not found\n", 23, COLOR_TXT); return; }
     }
-    uint8_t filebuf[4096];
-    struct EXT2DriverRequest req = { 
-        .buf = filebuf, 
-        .name = base, 
-        .name_len = (uint8_t)strlen(base), 
-        .parent_inode = parent_inode, 
-        .buffer_size = sizeof(filebuf), 
-        .is_folder = false 
-    };
-    int8_t rc = -1;
-    rc = fs_readfile(&req, &rc);
-    if (rc == 0) {
-        for (uint32_t i = 0; i < sizeof(filebuf); i++) {
-            char c = (char)filebuf[i];
-            if (c == 0) break;
+    if (write_mode) {
+        char input_buf[4096];
+        uint32_t input_len = 0;
+        while (input_len < 4096 - 1) {
+            char c = 0; sys_getchar(&c);
+            if(!c) continue;
+            if (c == 3 || c == 4) {
+                sys_putchar('\n', COLOR_TXT);
+                break;
+            }
+            if (c == '\b') {
+                if (input_len > 0) {
+                    input_len--;
+                    sys_putchar('\b', COLOR_TXT);
+                    // sys_putchar(' ', COLOR_TXT);
+                    // sys_putchar('\b', COLOR_TXT);
+                }
+                continue;
+            }
+
+            // Store and Echo
+            input_buf[input_len] = c;
+            input_len++;
             putc_color(c, COLOR_TXT);
         }
-        sys_putchar('\n', COLOR_TXT);
-    } else {
-        sys_puts("cat: error code ", 16, COLOR_TXT);
-        sys_putchar('0' + rc, COLOR_TXT);
-        sys_putchar('\n', COLOR_TXT);
+        input_buf[input_len] = 0; 
+
+        struct EXT2DriverRequest req = { 
+            .buf = (uint8_t*)input_buf, 
+            .name = base, 
+            .name_len = (uint8_t)strlen(base), 
+            .parent_inode = parent_inode, 
+            .buffer_size = input_len,
+            .is_folder = false 
+        };
+
+        int8_t rc = -1;
+        rc = fs_write(&req, &rc);
+
+        if (rc == 0) sys_puts("File saved.\n", 12, COLOR_TXT);
+        else {
+            sys_puts("Write error: ", 13, COLOR_TXT);
+            sys_putchar('0' + rc, COLOR_TXT);
+            sys_putchar('\n', COLOR_TXT);
+        }
+    }
+    else {
+        uint8_t filebuf[4096];
+        struct EXT2DriverRequest req = { 
+            .buf = filebuf, 
+            .name = base, 
+            .name_len = (uint8_t)strlen(base), 
+            .parent_inode = parent_inode, 
+            .buffer_size = sizeof(filebuf), 
+            .is_folder = false 
+        };
+        int8_t rc = -1;
+        rc = fs_readfile(&req, &rc);
+        if (rc == 0) {
+            for (uint32_t i = 0; i < sizeof(filebuf); i++) {
+                char c = (char)filebuf[i];
+                if (c == 0) break;
+                putc_color(c, COLOR_TXT);
+            }
+            sys_putchar('\n', COLOR_TXT);
+        } else {
+            sys_puts("cat: error code ", 16, COLOR_TXT);
+            sys_putchar('0' + rc, COLOR_TXT);
+            sys_putchar('\n', COLOR_TXT);
+        }
     }
 }
 
@@ -879,7 +938,6 @@ static bool try_exec_with_path(char* argv[]) {
     if (strchr(cmd, '/') != 0) {
         return (spawn_program_at(cmd) == 0);
     }
-
     for (int i = 0; i < path_dir_count; i++) {
         char full[MAX_LINE];
         strncpy(full, path_dirs[i], MAX_LINE - 1);
