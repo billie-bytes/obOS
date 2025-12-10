@@ -850,12 +850,13 @@ static int spawn_program_at(const char *prog_path) {
         }
     }
 
+    uint32_t process_buffer = (2 * 1024 * 1024);
     struct EXT2DriverRequest req = {
         .buf          = (uint8_t*)0,
         .name         = base,
         .name_len     = (uint8_t)strlen(base),
         .parent_inode = parent_inode,
-        .buffer_size  = 0x100000,
+        .buffer_size  = process_buffer,
         .is_folder    = false
     };
 
@@ -916,8 +917,9 @@ static void cmd_ps(int argc, char* argv[]) {
     }
     
     // Print header
-    sys_puts("PID  STATE    NAME\n", 18, COLOR_TXT);
-    sys_puts("---  -------  --------\n", 24, COLOR_TXT);
+    sys_puts("PID  STATE    NAME", 18, COLOR_TXT);
+    sys_putchar('\n', COLOR_TXT);
+    sys_puts("---  -------  ----\n", 24, COLOR_TXT);
     
     for (int i = 0; i < count; i++) {
         // Print PID (2 digits)
