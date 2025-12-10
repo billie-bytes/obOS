@@ -38,6 +38,15 @@ struct EXT2DriverRequest {
 uint32_t current_directory_inode = 2;
 char current_path[256] = "/";
 
+#define MAX_PATH_DIRS 8
+#define MAX_PATH_STR  64
+#define PATH_CONF_FILE "/path.conf"
+
+static char path_dirs[MAX_PATH_DIRS][MAX_PATH_STR];
+static int  path_dir_count = 0;
+
+// ==== PATH helpers ====
+
 // Directory traversal helper types used by autocomplete and path helpers
 struct DirectoryTraversal {
     uint8_t* base;
@@ -212,7 +221,7 @@ static int autocomplete(char* buf, int cur_len){
     char match_list[HIST_MAX][256];
 
     if (is_first_word) {
-        const char* builtins[] = { "ls","cd","pwd","cat","mkdir","exec","ps","kill","clear","help","exit" };
+        const char* builtins[] = { "ls","cd","pwd","cat","mkdir","exec","ps","kill","clear","help", "export", "exit" };
         int ncmd = (int)(sizeof(builtins)/sizeof(builtins[0]));
         for (int i=0;i<ncmd;i++) {
             if (prefix_len == 0 || strncmp(builtins[i], prefix, (size_t)prefix_len) == 0) {
@@ -487,6 +496,173 @@ static void split_path(const char* in, char* parent_out, char* base_out) {
     strcpy(base_out, last+1);
 }
 
+static void path_clear(void) {
+    path_dir_count = 0;
+}
+
+static int path_index_of(const char *dir) {
+    for (int i = 0; i < path_dir_count; i++) {
+        if (strcmp(path_dirs[i], dir) == 0) return i;
+    }
+    return -1;
+}
+
+static int path_add(const char *dir) {
+    if (!dir || !*dir) return -1;
+    if (path_index_of(dir) >= 0) return 0;
+    if (path_dir_count >= MAX_PATH_DIRS) return -1;
+
+    strncpy(path_dirs[path_dir_count], dir, MAX_PATH_STR - 1);
+    path_dirs[path_dir_count][MAX_PATH_STR - 1] = 0;
+    path_dir_count++;
+    return 0;
+}
+
+static int path_remove(const char *dir) {
+    int idx = path_index_of(dir);
+    if (idx < 0) return -1;
+    for (int i = idx + 1; i < path_dir_count; i++) {
+        strcpy(path_dirs[i - 1], path_dirs[i]);
+    }
+    path_dir_count--;
+    return 0;
+}
+
+// Return parent inode and basename for PATH_CONF_FILE
+static bool get_path_conf_parent(uint32_t *parent_inode_out, char *base_out) {
+    char parent_path[MAX_LINE];
+    split_path(PATH_CONF_FILE, parent_path, base_out);
+    // PATH_CONF_FILE is absolute
+    if (strcmp(parent_path, "/") == 0) {
+        *parent_inode_out = 2;   // root inode
+        return true;
+    }
+    return resolve_path(parent_path, parent_inode_out);
+}
+
+static void save_path_to_disk(void) {
+    uint32_t parent_inode;
+    char base[MAX_LINE];
+
+    if (!get_path_conf_parent(&parent_inode, base)) return;
+
+    uint8_t buf[512];
+    uint32_t pos = 0;
+
+    for (int i = 0; i < path_dir_count; i++) {
+        size_t L = strlen(path_dirs[i]);
+        if (pos + L + 2 >= sizeof(buf)) break; // avoid overflow
+        memcpy(buf + pos, path_dirs[i], L);
+        pos += (uint32_t)L;
+        buf[pos++] = '\n';
+    }
+    if (pos == 0) {
+        buf[0] = 0;
+        pos = 1;
+    } else {
+        buf[pos] = 0;
+        pos++;
+    }
+
+    struct EXT2DriverRequest req = {
+        .buf          = buf,
+        .name         = base,
+        .name_len     = (uint8_t)strlen(base),
+        .parent_inode = parent_inode,
+        .buffer_size  = pos,
+        .is_folder    = false
+    };
+    int8_t rc = -1;
+    fs_write(&req, &rc);
+    (void)rc;
+}
+
+static void load_path_from_disk(void) {
+    path_clear();
+
+    uint32_t parent_inode;
+    char base[MAX_LINE];
+
+    if (!get_path_conf_parent(&parent_inode, base)) {
+        path_add("/bin");
+        return;
+    }
+
+    uint8_t buf[512];
+    struct EXT2DriverRequest req = {
+        .buf          = buf,
+        .name         = base,
+        .name_len     = (uint8_t)strlen(base),
+        .parent_inode = parent_inode,
+        .buffer_size  = sizeof(buf),
+        .is_folder    = false
+    };
+    int8_t rc = -1;
+    fs_readfile(&req, &rc);
+    if (rc != 0) {
+        path_add("/bin");
+        return;
+    }
+
+    uint32_t i = 0;
+    while (i < sizeof(buf) && buf[i] != 0) {
+        char tmp[MAX_PATH_STR];
+        uint32_t j = 0;
+        while (i < sizeof(buf) && buf[i] != '\n' && buf[i] != 0 && j < MAX_PATH_STR - 1) {
+            tmp[j++] = (char)buf[i++];
+        }
+        tmp[j] = 0;
+        if (j > 0) path_add(tmp);
+        if (i < sizeof(buf) && buf[i] == '\n') i++;
+    }
+
+    if (path_dir_count == 0) {
+        path_add("/bin");
+    }
+}
+
+static void path_print(void) {
+    for (int i = 0; i < path_dir_count; i++) {
+        sys_puts(path_dirs[i], strlen(path_dirs[i]), COLOR_TXT);
+        if (i + 1 < path_dir_count)
+            sys_puts(":", 1, COLOR_TXT);
+    }
+    sys_putchar('\n', COLOR_TXT);
+}
+
+
+static void cmd_export(int argc, char* argv[]) {
+    if (argc == 1) {
+        path_print();
+        return;
+    }
+    if (argc < 3) {
+        sys_puts("usage: export add|del <DIR>\n", 30, COLOR_TXT);
+        return;
+    }
+
+    const char *op  = argv[1];
+    const char *dir = argv[2];
+
+    if (strcmp(op, "add") == 0) {
+        if (path_add(dir) == 0) {
+            save_path_to_disk();
+        } else {
+            sys_puts("export: cannot add PATH entry\n", 32, COLOR_TXT);
+        }
+    } else if (strcmp(op, "del") == 0) {
+        if (path_remove(dir) == 0) {
+            save_path_to_disk();
+        } else {
+            sys_puts("export: directory not in PATH\n", 33, COLOR_TXT);
+        }
+    } else {
+        sys_puts("usage: export add|del <DIR>\n", 30, COLOR_TXT);
+    }
+}
+
+
+
 static void cmd_pwd(int argc, char* argv[]) {
     (void)argc; (void)argv;
     sys_puts(current_path, strlen(current_path), COLOR_TXT);
@@ -505,6 +681,7 @@ static void cmd_help(int argc, char* argv[]) {
     sys_puts("  ps\n", 5, COLOR_TXT);
     sys_puts("  kill <PID>\n", 13, COLOR_TXT);
     sys_puts("  clear\n", 8, COLOR_TXT);
+    sys_puts("  export [add|del] <DIR>\n", 26, COLOR_TXT);
     sys_puts("  help\n", 7, COLOR_TXT);
     sys_puts("  exit\n", 7, COLOR_TXT);
 }
@@ -651,42 +828,80 @@ static void cmd_mkdir(int argc, char* argv[]) {
     sys_putchar('\n', COLOR_TXT);
 }
 
+static int spawn_program_at(const char *prog_path) {
+    char parent_path[MAX_LINE], base[MAX_LINE];
+    split_path(prog_path, parent_path, base);
+
+    uint32_t parent_inode;
+
+    if (prog_path[0] == '/') {
+        if (strcmp(parent_path, "/") == 0)
+            parent_inode = 2;
+        else if (!resolve_path(parent_path, &parent_inode)) {
+            sys_puts("exec: parent not found\n", 23, COLOR_TXT);
+            return -1;
+        }
+    } else {
+        if (strcmp(parent_path, ".") == 0)
+            parent_inode = current_directory_inode;
+        else if (!resolve_path(parent_path, &parent_inode)) {
+            sys_puts("exec: parent not found\n", 23, COLOR_TXT);
+            return -1;
+        }
+    }
+
+    struct EXT2DriverRequest req = {
+        .buf          = (uint8_t*)0,
+        .name         = base,
+        .name_len     = (uint8_t)strlen(base),
+        .parent_inode = parent_inode,
+        .buffer_size  = 0x100000,
+        .is_folder    = false
+    };
+
+    int32_t res = sys_exec(&req);
+    return res;
+}
+
+
 static void cmd_exec(int argc, char* argv[]) {
     if (argc < 2) { 
         sys_puts("exec: missing program name\n", 28, COLOR_TXT); 
         return; 
     }
-    
-    // Parse path to get parent directory and filename
-    char parent_path[MAX_LINE], base[MAX_LINE];
-    split_path(argv[1], parent_path, base);
-    
-    uint32_t parent_inode;
-    if (argv[1][0] == '/') {
-        if (strcmp(parent_path, "/") == 0) parent_inode = 2;
-        else if (!resolve_path(parent_path, &parent_inode)) {
-            sys_puts("exec: parent not found\n", 23, COLOR_TXT);
-            return;
+    (void)spawn_program_at(argv[1]);
+}
+
+static bool try_exec_with_path(char* argv[]) {
+    const char *cmd = argv[0];
+
+    // If command already contains '/', treat it as a direct path
+    if (strchr(cmd, '/') != 0) {
+        return (spawn_program_at(cmd) == 0);
+    }
+
+    for (int i = 0; i < path_dir_count; i++) {
+        char full[MAX_LINE];
+        strncpy(full, path_dirs[i], MAX_LINE - 1);
+        full[MAX_LINE - 1] = 0;
+
+        size_t L = strlen(full);
+        if (L == 0) continue;
+
+        if (full[L-1] != '/' && L < MAX_LINE - 1) {
+            full[L]   = '/';
+            full[L+1] = 0;
+            L++;
         }
-    } else {
-        if (strcmp(parent_path, ".") == 0) parent_inode = current_directory_inode;
-        else if (!resolve_path(parent_path, &parent_inode)) {
-            sys_puts("exec: parent not found\n", 23, COLOR_TXT);
-            return;
+
+        if (L + strlen(cmd) >= MAX_LINE) continue;
+        strcat(full, cmd);
+
+        if (spawn_program_at(full) == 0) {
+            return true;    // success
         }
     }
-    
-    // Create process request
-    struct EXT2DriverRequest req = {
-        .buf = (uint8_t*) 0,  // Kernel will load at address 0
-        .name = base,
-        .name_len = (uint8_t)strlen(base),
-        .parent_inode = parent_inode,
-        .buffer_size = 0x100000,  // 1MB buffer
-        .is_folder = false
-    };
-    
-    sys_exec(&req);
+    return false; // nothing worked
 }
 
 static void cmd_ps(int argc, char* argv[]) {
@@ -794,8 +1009,15 @@ static void execute_command(int argc, char* argv[]) {
     else if (strcmp(argv[0], "ps") == 0) cmd_ps(argc, argv);
     else if (strcmp(argv[0], "kill") == 0) cmd_kill(argc, argv);
     else if (strcmp(argv[0], "clear") == 0) { __asm__ volatile("mov $8, %eax; int $0x30"); }
+    else if (strcmp(argv[0], "export") == 0) { cmd_export(argc, argv); }
     else if (strcmp(argv[0], "exit") == 0) cmd_exit(argc, argv);
-    else { sys_puts("undefined command: ", 19, COLOR_TXT); sys_puts(argv[0], strlen(argv[0]), COLOR_TXT); sys_putchar('\n', COLOR_TXT); }
+    else {
+        if (!try_exec_with_path(argv)) {
+            sys_puts("undefined command: ", 19, COLOR_TXT);
+            sys_puts(argv[0], strlen(argv[0]), COLOR_TXT);
+            sys_putchar('\n', COLOR_TXT);
+        }
+    }
 }
 
 int main(void) {
@@ -805,6 +1027,7 @@ int main(void) {
     int len = 0;
 
     sys_keyboard_activate();
+    load_path_from_disk();
     print_prompt();
 
     while (1) {
