@@ -27,7 +27,7 @@ all: build
 build: iso
 
 # Insert all user programs into disk
-insert-all: insert-shell insert-clock insert-hello
+insert-all: insert-shell insert-clock insert-hello insert-badapple insert-anim
 	@echo All user programs inserted successfully!
 
 clean:
@@ -131,6 +131,24 @@ user-hello:
 insert-hello: inserter user-hello
 	@echo Inserting hello into root directory...
 	@cd $(OUTPUT_FOLDER); ./inserter hello 2 $(DISK_NAME).bin
+
+user-badapple:
+	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/crt0.s -o crt0.o
+	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/user-badapple.c -o user-badapple.o
+	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/string.c -o string.o
+	@$(LIN) -T $(SOURCE_FOLDER)/user-linker.ld -melf_i386 --oformat=binary \
+		crt0.o user-badapple.o string.o -o $(OUTPUT_FOLDER)/badapple
+	@echo Linking badapple object files and generate flat binary...
+	@size --target=binary $(OUTPUT_FOLDER)/badapple
+	@rm -f *.o
+
+insert-badapple: inserter user-badapple
+	@echo Inserting badapple into root directory...
+	@cd $(OUTPUT_FOLDER); ./inserter badapple 2 $(DISK_NAME).bin
+
+insert-anim: inserter
+	@echo Inserting badapple.txt into root directory...
+	@cd $(OUTPUT_FOLDER); ./inserter badapple.txt 2 $(DISK_NAME).bin
 
 insert-file: inserter
 	@echo Inserting $(FILE_NAME) into root directory...
