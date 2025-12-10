@@ -132,3 +132,7 @@ user-hello:
 insert-hello: inserter user-hello
 	@echo Inserting hello into root directory...
 	@cd $(OUTPUT_FOLDER); ./inserter hello 2 $(DISK_NAME).bin
+
+insert-file: inserter
+	@echo Inserting $(FILE_NAME) into root directory...
+	@cd $(OUTPUT_FOLDER); ./inserter $(FILE_NAME) 2 $(DISK_NAME).bin
