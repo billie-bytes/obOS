@@ -796,8 +796,8 @@ static void cmd_cat(int argc, char* argv[]) {
                 if (input_len > 0) {
                     input_len--;
                     sys_putchar('\b', COLOR_TXT);
-                    // sys_putchar(' ', COLOR_TXT);
-                    // sys_putchar('\b', COLOR_TXT);
+                    sys_putchar(' ', COLOR_TXT);
+                    sys_putchar('\b', COLOR_TXT);
                 }
                 continue;
             }

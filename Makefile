@@ -33,8 +33,6 @@ insert-all: insert-shell insert-clock insert-hello
 clean:
 	rm -rf *.o *.iso $(OUTPUT_FOLDER)/kernel
 
-
-
 kernel:
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/kernel-entrypoint.s -o $(OUTPUT_FOLDER)/kernel-entrypoint.o
 # TODO: Compile C file with CFLAGS
