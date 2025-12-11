@@ -10,6 +10,7 @@
 #include "header/memory/paging.h"
 #include "header/process/process.h"
 #include "header/scheduler/scheduler.h"
+#include "header/driver/speaker.h"
 #include <stdbool.h>
 
 void kernel_setup(void) {
@@ -22,6 +23,7 @@ void kernel_setup(void) {
     initialize_filesystem_ext2();
     gdt_install_tss();
     set_tss_register();
+    speaker_init();  // Initialize PC Speaker driver
 
     paging_allocate_user_page_frame(&_paging_kernel_page_directory, (uint8_t*) 0);
     // Write shell into memory

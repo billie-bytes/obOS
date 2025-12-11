@@ -8,6 +8,7 @@
 #include "header/scheduler/scheduler.h"
 #include "header/process/process.h"
 #include "header/cmos/cmos.h"
+#include "header/driver/speaker.h"
 
 struct TSSEntry _interrupt_tss_entry = {
     .ss0  = GDT_KERNEL_DATA_SEGMENT_SELECTOR,
@@ -216,6 +217,21 @@ void syscall(struct InterruptFrame frame) {
             // ebx = row, ecx = col, edx = char, edi = color
             framebuffer_write((uint8_t)frame.cpu.general.ebx, (uint8_t)frame.cpu.general.ecx, 
                              (char)frame.cpu.general.edx, (uint8_t)frame.cpu.index.edi, 0);
+            break;
+        case 18:
+        /* Play tone on PC Speaker */
+            // ebx = frequency in Hz
+            speaker_play_tone(frame.cpu.general.ebx);
+            break;
+        case 19:
+        /* Stop PC Speaker */
+            speaker_stop();
+            break;
+        case 20:
+        /* Beep on PC Speaker */
+            // ebx = frequency in Hz
+            // ecx = duration in milliseconds
+            speaker_beep(frame.cpu.general.ebx, frame.cpu.general.ecx);
             break;
     }
 }
