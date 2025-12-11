@@ -38,4 +38,7 @@ void scheduler_set_skip_context_switch(bool v);
 __attribute__((noreturn)) void scheduler_switch_to_next_process(void);
 
 void timer_isr(struct InterruptFrame frame);
+
+// Tick counter accessor for sleep/wakeup logic
+uint64_t scheduler_get_ticks(void);
 #endif
