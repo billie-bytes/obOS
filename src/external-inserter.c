@@ -7,124 +7,114 @@
 #include "header/driver/disk.h"
 #include "header/stdlib/string.h"
 
-// Global variable
-uint8_t *image_storage;
-uint8_t *file_buffer;
-/* Read Buffer: 4MB */
-uint8_t *read_buffer; 
 
+
+// Global File Pointer acts as our "storage"
+FILE *disk_image_ptr = NULL;
+
+/**
+ * Reads blocks directly from the file on disk without loading the whole file.
+ */
 void read_blocks(void *ptr, uint32_t logical_block_address, uint8_t block_count) {
-    for (int i = 0; i < block_count; i++) {
-        memcpy(
-            (uint8_t*) ptr + BLOCK_SIZE*i, 
-            image_storage + BLOCK_SIZE*(logical_block_address+i), 
-            BLOCK_SIZE
-        );
+    if (disk_image_ptr == NULL) return;
+
+    // logical_block * 1024 = byte offset
+    long offset = (long)logical_block_address * BLOCK_SIZE;
+    
+    if (fseek(disk_image_ptr, offset, SEEK_SET) != 0) {
+        fprintf(stderr, "Error: seek failed at block %u\n", logical_block_address);
+        return;
     }
+
+    fread(ptr, BLOCK_SIZE, block_count, disk_image_ptr);
 }
 
+/**
+ * Writes blocks directly to the file on disk.
+ */
 void write_blocks(const void *ptr, uint32_t logical_block_address, uint8_t block_count) {
-    for (int i = 0; i < block_count; i++) {
-        memcpy(
-            image_storage + BLOCK_SIZE*(logical_block_address+i), 
-            (uint8_t*) ptr + BLOCK_SIZE*i, 
-            BLOCK_SIZE
-        );
+    if (disk_image_ptr == NULL) return;
+
+    long offset = (long)logical_block_address * BLOCK_SIZE;
+
+    if (fseek(disk_image_ptr, offset, SEEK_SET) != 0) {
+        fprintf(stderr, "Error: seek failed at block %u\n", logical_block_address);
+        return;
     }
+
+    fwrite(ptr, BLOCK_SIZE, block_count, disk_image_ptr);
+    
+    // Optional: flush to ensure data is written immediately (slower but safer)
+    fflush(disk_image_ptr);
 }
+
 
 int main(int argc, char *argv[]) {
     if (argc < 4) {
-        fprintf(stderr, "inserter: ./inserter <file to insert> <parent cluster index> <storage>\n");
+        fprintf(stderr, "Usage: ./inserter <file to insert> <parent inode> <disk image> [--replace]\n");
         exit(1);
     }
 
-    bool is_replace = false;
-    if (argc >= 5 && strcmp(argv[4], "--replace") == 0) {
-        is_replace = true;
+    bool is_replace = (argc >= 5 && strcmp(argv[4], "--replace") == 0);
+
+    // "r+b" allows reading and writing without truncating the file.
+    disk_image_ptr = fopen(argv[3], "r+b");
+    if (disk_image_ptr == NULL) {
+        perror("Error opening disk image");
+        exit(1);
     }
 
-    // Read storage into memory, requiring 4 MB memory
-    image_storage = malloc(4*1024*1024);
-    file_buffer   = malloc(4*1024*1024);
-    read_buffer   = malloc(4*1024*1024);
-    FILE *fptr    = fopen(argv[3], "r");
-    fread(image_storage, 4*1024*1024, 1, fptr);
-    fclose(fptr);
-
-    // Read target file, assuming file is less than 4 MiB
-    FILE *fptr_target = fopen(argv[1], "r");
-    size_t filesize   = 0;
-    if (fptr_target == NULL)
-        filesize = 0;
-    else {
-        fread(file_buffer, 4*1024*1024, 1, fptr_target);
-        fseek(fptr_target, 0, SEEK_END);
-        filesize = ftell(fptr_target);
-        fclose(fptr_target);
+    FILE *fptr_target = fopen(argv[1], "rb");
+    if (fptr_target == NULL) {
+        perror("Error opening input file");
+        fclose(disk_image_ptr);
+        exit(1);
     }
 
-    printf("Filename : %s\n",  argv[1]);
-    printf("Filesize : %ld bytes\n", filesize);
+    fseek(fptr_target, 0, SEEK_END);
+    long filesize_long = ftell(fptr_target);
+    rewind(fptr_target);
+    uint32_t filesize = (uint32_t)filesize_long;
 
-    // EXT2 operations
+    // Allocate buffer ONLY for the file being inserted
+    uint8_t *file_buffer = malloc(filesize);
+    if (file_buffer == NULL) {
+        perror("Malloc failed for file buffer");
+        exit(1);
+    }
+    fread(file_buffer, filesize, 1, fptr_target);
+    fclose(fptr_target);
+
+    printf("Inserting: %s (%u bytes)\n", argv[1], filesize);
+
+
+    // This will now call the custom read_blocks() which uses fseek
+    // It reads Superblock/GDT from disk on-demand.
     initialize_filesystem_ext2();
-    char *name = argv[1];
-    uint8_t filename_length = strlen(name);
 
     struct EXT2DriverRequest request;
-    struct EXT2DriverRequest reqread;
-    printf("Filename       : %s\n", name);
-    printf("Filename length: %d\n", filename_length);
+    memset(&request, 0, sizeof(struct EXT2DriverRequest));
 
     request.buf = file_buffer;
     request.buffer_size = filesize;
-    request.name = name;
-    request.name_len = filename_length;
+    request.name = argv[1]; 
+    request.name_len = strlen(argv[1]);
     request.is_folder = false;
-    sscanf(argv[2], "%u", &request.parent_inode);
-    sscanf(argv[1], "%s", request.name);
+    request.parent_inode = (uint32_t)atoi(argv[2]);
 
-    reqread = request;
-    reqread.buf = read_buffer;
-    int retcode = read(reqread);
-    if (retcode == 0)
-    {
-        bool same = true;
-        for (uint32_t i = 0; i < filesize; i++)
-        {
-            if (read_buffer[i] != file_buffer[i])
-            {
-                printf("not same\n");
-                same = false;
-                break;
-            }
-        }
-        if (same)
-        {
-            printf("same\n");
-        }
-    }
+    int retcode = write(request);
 
-    retcode = write(request);
-    if (retcode == 1 && is_replace)
-    {
-        retcode = delete(request);
+    if (retcode == 1 && is_replace) {
+        printf("File exists, replacing...\n");
+        delete(request);
         retcode = write(request);
     }
-    if (retcode == 0)
-        puts("Write success");
-    else if (retcode == 1)
-        puts("Error: File/folder name already exist");
-    else if (retcode == 2)
-        puts("Error: Invalid parent node index");
-    else
-        puts("Error: Unknown error");
 
-    // Write image in memory into original, overwrite them
-    fptr = fopen(argv[3], "w");
-    fwrite(image_storage, 4 * 1024 * 1024, 1, fptr);
-    fclose(fptr);
+    if (retcode == 0) printf("Write Success!\n");
+    else printf("Write Failed. Error Code: %d\n", retcode);
+
+    free(file_buffer);
+    fclose(disk_image_ptr); // This saves the changes to the .img file
 
     return 0;
 }

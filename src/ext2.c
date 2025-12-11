@@ -49,9 +49,79 @@ const uint8_t fs_signature[BLOCK_SIZE] = {
     [BLOCK_SIZE-2] = 'S',
     [BLOCK_SIZE-1] = 'h', 
 };
-
+/*GLOBAL METADATAS*/
 static struct EXT2Superblock superBlock;
 struct EXT2BlockGroupDescriptorTable b_group_descriptor_table;
+
+
+static uint8_t raw_p[GDT_SIZE_BLOCKS * BLOCK_SIZE];
+static uint8_t raw_m[GDT_SIZE_BLOCKS * BLOCK_SIZE];
+static uint8_t raw_l[GDT_SIZE_BLOCKS * BLOCK_SIZE];
+/**
+ * @brief Reads three GDT from different block groups and does a majority vote of the uncorrupt one
+ * @param gdt_out Pointer to store the validated GDT
+ * @return 0 on success, 1 on recovery, -1 on failure
+ */
+int8_t read_redundant_gdt() {
+
+    uint32_t mid_group_idx = GROUPS_COUNT / 2;
+    uint32_t last_group_idx = GROUPS_COUNT - 1;
+
+    read_blocks(raw_p, GDT_OFFSET, GDT_SIZE_BLOCKS);
+    read_blocks(raw_m, mid_group_idx * BLOCKS_PER_GROUP + GDT_OFFSET, GDT_SIZE_BLOCKS);
+    read_blocks(raw_l, last_group_idx * BLOCKS_PER_GROUP + GDT_OFFSET, GDT_SIZE_BLOCKS);
+
+    if (memcmp(raw_p, raw_m, GDT_SIZE_BLOCKS * BLOCK_SIZE) == 0) {
+        memcpy(&b_group_descriptor_table, raw_p, sizeof(struct EXT2BlockGroupDescriptorTable));
+        return 0;
+    }
+    if (memcmp(raw_p, raw_l, GDT_SIZE_BLOCKS * BLOCK_SIZE) == 0) {
+        memcpy(&b_group_descriptor_table, raw_p, sizeof(struct EXT2BlockGroupDescriptorTable));
+        write_blocks(raw_p, mid_group_idx * BLOCKS_PER_GROUP + GDT_OFFSET, GDT_SIZE_BLOCKS); // we assume that raw_m is corrupted
+        return 0;
+    }
+
+    if (memcmp(raw_m, raw_l, GDT_SIZE_BLOCKS * BLOCK_SIZE) == 0) {
+        memcpy(&b_group_descriptor_table, raw_m, sizeof(struct EXT2BlockGroupDescriptorTable));
+        write_blocks(raw_m, GDT_OFFSET, GDT_SIZE_BLOCKS); // we assume that raw_p is corrupted
+        return 1;
+    }
+    //Nothing is consistent, follow raw_p
+    memcpy(&b_group_descriptor_table, raw_p, sizeof(struct EXT2BlockGroupDescriptorTable));
+    return -1;
+}
+
+
+int8_t read_redundant_sb(){
+    struct BlockBuffer SBP;
+    struct BlockBuffer SBM;
+    struct BlockBuffer SBL;
+
+    read_blocks(&SBP, SB_OFFSET, 1);
+    read_blocks(&SBM, (GROUPS_COUNT/2)*(BLOCKS_PER_GROUP) + SB_OFFSET, 1);
+    read_blocks(&SBL, (GROUPS_COUNT-1)*(BLOCKS_PER_GROUP) + SB_OFFSET, 1);
+
+    if (memcmp(&SBP, &SBM, BLOCK_SIZE) == 0) {
+        memcpy(&superBlock, &SBP, sizeof(struct EXT2Superblock));
+        return 0;
+    }
+
+    if (memcmp(&SBP, &SBL, BLOCK_SIZE) == 0) {
+        memcpy(&superBlock, &SBP, sizeof(struct EXT2Superblock));
+        write_blocks(&SBP, (GROUPS_COUNT/2)*(BLOCKS_PER_GROUP) + SB_OFFSET, 1);
+        return 0;
+    }
+
+    if (memcmp(&SBM, &SBL, BLOCK_SIZE) == 0) {
+        memcpy(&superBlock, &SBM, sizeof(struct EXT2Superblock));
+        write_blocks(&SBM, SB_OFFSET, 1);
+        return 0;
+    }
+
+    memcpy(&superBlock, &SBP, sizeof(struct EXT2Superblock));
+    return -1;
+
+}
 
 /**
  * @brief Just a simple helper of writing a 4 byte value into a blockbuffer
@@ -77,30 +147,25 @@ uint32_t write16toBlock(uint16_t value, struct BlockBuffer* block, uint16_t offs
     return 1;
 }
 
-/**
- * @brief Takes an inode number and puts the content of that inode from disk into the logical inode
- * @param inode_num The inode number that is
- */
 int8_t read_inode(uint32_t inode_num, struct EXT2Inode* inode){
-    if(inode_num>INODES_COUNT){
+    if(inode_num > INODES_COUNT){
         return -1;
     }
     uint32_t block_group_index = inode_to_bgd(inode_num);
-    uint32_t inode_idx_in_group = inode_to_local(inode_num); //idx of inode relative to the bgd
-    uint32_t block_idx_in_table = inode_idx_in_group/INODES_PER_TABLE; //idx of the block of inode (one block holds 7 inodes in the table)
-    uint32_t inode_idx_in_block = inode_idx_in_group%INODES_PER_TABLE;
+    uint32_t inode_idx_in_group = inode_to_local(inode_num); 
+    uint32_t block_idx_in_table = inode_idx_in_group / INODES_PER_TABLE;
+    uint32_t inode_idx_in_block = inode_idx_in_group % INODES_PER_TABLE;
+    if (read_redundant_gdt() == -1) {
+        return -1;
+    }
 
-    struct EXT2BlockGroupDescriptorTable gdt;
-    struct BlockBuffer temp;
-    read_blocks(&temp, 3, 1);
-    gdt = *(struct EXT2BlockGroupDescriptorTable*)&temp;
-    struct EXT2BlockGroupDescriptor descriptor = gdt.table[block_group_index];
+    struct EXT2BlockGroupDescriptor descriptor = b_group_descriptor_table.table[block_group_index];
     uint32_t inode_table_start = descriptor.bg_inode_table;
     uint32_t inode_block_idx = inode_table_start + block_idx_in_table;
-
     struct BlockBuffer table;
-    read_blocks(&table,inode_block_idx,1); 
-    memcpy(inode, &table.buf[inode_idx_in_block*INODE_SIZE], INODE_SIZE);
+    read_blocks(&table, inode_block_idx, 1);
+    memcpy(inode, &table.buf[inode_idx_in_block * INODE_SIZE], INODE_SIZE);
+    
     return 1;
 }
 
@@ -177,78 +242,8 @@ uint32_t read_inode_blocks(struct EXT2Inode node, uint32_t block_index) {
     }
 }
 
-/**
- * @brief Reads three GDT from different block groups and does a majority vote of the uncorrupt one
- * @param gdt_out Pointer to store the validated GDT
- * @return 0 on success, 1 on recovery, -1 on failure
- */
-int8_t read_redundant_gdt() {
-    uint8_t raw_p[GDT_SIZE_BLOCKS * BLOCK_SIZE];
-    uint8_t raw_m[GDT_SIZE_BLOCKS * BLOCK_SIZE];
-    uint8_t raw_l[GDT_SIZE_BLOCKS * BLOCK_SIZE];
-
-    uint32_t mid_group_idx = GROUPS_COUNT / 2;
-    uint32_t last_group_idx = GROUPS_COUNT - 1;
-
-    read_blocks(raw_p, GDT_OFFSET, GDT_SIZE_BLOCKS);
-    read_blocks(raw_m, mid_group_idx * BLOCKS_PER_GROUP + GDT_OFFSET, GDT_SIZE_BLOCKS);
-    read_blocks(raw_l, last_group_idx * BLOCKS_PER_GROUP + GDT_OFFSET, GDT_SIZE_BLOCKS);
-
-    if (memcmp(raw_p, raw_m, GDT_SIZE_BLOCKS * BLOCK_SIZE) == 0) {
-        memcpy(&b_group_descriptor_table, raw_p, sizeof(struct EXT2BlockGroupDescriptorTable));
-        return 0;
-    }
-    if (memcmp(raw_p, raw_l, GDT_SIZE_BLOCKS * BLOCK_SIZE) == 0) {
-        memcpy(&b_group_descriptor_table, raw_p, sizeof(struct EXT2BlockGroupDescriptorTable));
-        write_blocks(raw_p, mid_group_idx * BLOCKS_PER_GROUP + GDT_OFFSET, GDT_SIZE_BLOCKS); // we assume that raw_m is corrupted
-        return 0;
-    }
-
-    if (memcmp(raw_m, raw_l, GDT_SIZE_BLOCKS * BLOCK_SIZE) == 0) {
-        memcpy(&b_group_descriptor_table, raw_m, sizeof(struct EXT2BlockGroupDescriptorTable));
-        write_blocks(raw_m, GDT_OFFSET, GDT_SIZE_BLOCKS); // we assume that raw_p is corrupted
-        return 1;
-    }
-    //Nothing is consistent, follow raw_p
-    memcpy(&b_group_descriptor_table, raw_p, sizeof(struct EXT2BlockGroupDescriptorTable));
-    return -1;
-}
 
 
-int8_t read_redundant_sb(){
-    struct BlockBuffer SBP;
-    struct BlockBuffer SBM;
-    struct BlockBuffer SBL;
-
-    read_blocks(&SBP, SB_OFFSET, 1);
-    read_blocks(&SBM, (GROUPS_COUNT/2)*(BLOCKS_PER_GROUP) + SB_OFFSET, 1);
-    read_blocks(&SBL, (GROUPS_COUNT-1)*(BLOCKS_PER_GROUP) + SB_OFFSET, 1);
-
-    if (memcmp(&SBP, &SBM, GDT_SIZE_BLOCKS * BLOCK_SIZE) == 0) {
-        memcpy(&superBlock, &SBP, sizeof(struct EXT2Superblock));
-        return 0;
-    }
-
-    if (memcmp(&SBP, &SBL, GDT_SIZE_BLOCKS * BLOCK_SIZE) == 0) {
-        memcpy(&superBlock, &SBP, sizeof(struct EXT2Superblock));
-        write_blocks(&SBP, (GROUPS_COUNT/2)*(BLOCKS_PER_GROUP) + SB_OFFSET, 1);
-        return 0;
-    }
-
-    if (memcmp(&SBM, &SBL, GDT_SIZE_BLOCKS * BLOCK_SIZE) == 0) {
-        memcpy(&superBlock, &SBM, sizeof(struct EXT2Superblock));
-        write_blocks(&SBM, SB_OFFSET, 1);
-        return 0;
-    }
-
-    memcpy(&superBlock, &SBP, sizeof(struct EXT2Superblock));
-    return -1;
-
-}
-
-static void GDT_write(){
-
-}
 
 static void superBlockWrite(){
     struct BlockBuffer b;
@@ -454,14 +449,14 @@ void initialize_filesystem_ext2(){
         initialize_bitmap();
 
         // Zero out the actual inode tables
-        struct BlockBuffer empty_block;
-        memset(&empty_block, 0, BLOCK_SIZE);
+        // struct BlockBuffer empty_block;
+        // memset(&empty_block, 0, BLOCK_SIZE);
         
-        for(uint32_t i = 0; i < GROUPS_COUNT; i++){
-            for(uint32_t j = 0; j < INODES_TABLE_BLOCK_COUNT; j++){
-                write_blocks(&empty_block, b_group_descriptor_table.table[i].bg_inode_table + j, 1);
-            }
-        }
+        // for(uint32_t i = 0; i < GROUPS_COUNT; i++){
+        //     for(uint32_t j = 0; j < INODES_TABLE_BLOCK_COUNT; j++){
+        //         write_blocks(&empty_block, b_group_descriptor_table.table[i].bg_inode_table + j, 1);
+        //     }
+        // }
 
         initialize_root();
     }
@@ -563,7 +558,7 @@ static int32_t find_dir_entry_in_block(struct BlockBuffer b, char* name, struct 
         if(((rec_len_offset-4)+curr_rec_len)==BLOCK_SIZE){
             lastEntry = true;
         }
-
+        if (curr_rec_len == 0) return -1;
         rec_len_offset = rec_len_offset + curr_rec_len;
         name_len_offset = name_len_offset + curr_rec_len;
         name_offset = name_offset + curr_rec_len;
@@ -611,7 +606,8 @@ uint32_t get_directory_entry(struct EXT2Inode parent_node, char* name, uint8_t f
         for (uint32_t i = 0; i < ptrs_per_block; i++) {
             if (processed_blocks >= total_blocks) break;
 
-            uint32_t direct_block_addr = read32fromBlock(indirect_block, i * sizeof(uint32_t));
+            // uint32_t direct_block_addr = read32fromBlock(indirect_block, i * sizeof(uint32_t));
+            uint32_t direct_block_addr = *(uint32_t*)&indirect_block.buf[i * sizeof(uint32_t)];
             if (direct_block_addr != 0) {
                 memset(&temp_block, 0, BLOCK_SIZE);
                 read_blocks(&temp_block, direct_block_addr, 1);
@@ -632,7 +628,8 @@ uint32_t get_directory_entry(struct EXT2Inode parent_node, char* name, uint8_t f
         for (uint32_t i = 0; i < ptrs_per_block; i++) {
             if (processed_blocks >= total_blocks) break;
 
-            uint32_t indirect_block_addr = read32fromBlock(d_indirect_block, i * sizeof(uint32_t));
+            // uint32_t indirect_block_addr = read32fromBlock(d_indirect_block, i * sizeof(uint32_t));
+            uint32_t indirect_block_addr = *(uint32_t*)&d_indirect_block.buf[i * sizeof(uint32_t)];
             if (indirect_block_addr != 0) {
                 struct BlockBuffer indirect_block;
                 read_blocks(&indirect_block, indirect_block_addr, 1);
@@ -640,7 +637,8 @@ uint32_t get_directory_entry(struct EXT2Inode parent_node, char* name, uint8_t f
                 for (uint32_t j = 0; j < ptrs_per_block; j++) {
                     if (processed_blocks >= total_blocks) break;
 
-                    uint32_t direct_block_addr = read32fromBlock(indirect_block, j * sizeof(uint32_t));
+                    // uint32_t direct_block_addr = read32fromBlock(indirect_block, j * sizeof(uint32_t));
+                    uint32_t direct_block_addr = *(uint32_t*)&indirect_block.buf[j * sizeof(uint32_t)];
                     if (direct_block_addr != 0) {
                         memset(&temp_block, 0, BLOCK_SIZE);
                         read_blocks(&temp_block, direct_block_addr, 1);
@@ -666,7 +664,9 @@ uint32_t get_directory_entry(struct EXT2Inode parent_node, char* name, uint8_t f
         for (uint32_t i = 0; i < ptrs_per_block; i++) {
             if (processed_blocks >= total_blocks) break;
 
-            uint32_t d_indirect_block_addr = read32fromBlock(t_indirect_block, i * sizeof(uint32_t));
+            // uint32_t d_indirect_block_addr = read32fromBlock(t_indirect_block, i * sizeof(uint32_t));
+            uint32_t d_indirect_block_addr = *(uint32_t*)&t_indirect_block.buf[i * sizeof(uint32_t)];
+            
             if (d_indirect_block_addr != 0) {
                 struct BlockBuffer d_indirect_block;
                 read_blocks(&d_indirect_block, d_indirect_block_addr, 1);
@@ -674,7 +674,8 @@ uint32_t get_directory_entry(struct EXT2Inode parent_node, char* name, uint8_t f
                 for (uint32_t j = 0; j < ptrs_per_block; j++) {
                     if (processed_blocks >= total_blocks) break;
 
-                    uint32_t indirect_block_addr = read32fromBlock(d_indirect_block, j * sizeof(uint32_t));
+                    // uint32_t indirect_block_addr = read32fromBlock(d_indirect_block, j * sizeof(uint32_t));
+                    uint32_t indirect_block_addr = *(uint32_t*)&d_indirect_block.buf[j * sizeof(uint32_t)];
                     if (indirect_block_addr != 0) {
                         struct BlockBuffer indirect_block;
                         read_blocks(&indirect_block, indirect_block_addr, 1);
@@ -682,7 +683,8 @@ uint32_t get_directory_entry(struct EXT2Inode parent_node, char* name, uint8_t f
                         for (uint32_t k = 0; k < ptrs_per_block; k++) {
                             if (processed_blocks >= total_blocks) break;
 
-                            uint32_t direct_block_addr = read32fromBlock(indirect_block, k * sizeof(uint32_t));
+                            // uint32_t direct_block_addr = read32fromBlock(indirect_block, k * sizeof(uint32_t));
+                            uint32_t direct_block_addr = *(uint32_t*)&indirect_block.buf[k * sizeof(uint32_t)];
                             if (direct_block_addr != 0) {
                                 memset(&temp_block, 0, BLOCK_SIZE);
                                 read_blocks(&temp_block, direct_block_addr, 1);
@@ -1091,7 +1093,7 @@ uint32_t deallocate_node(uint32_t inode){
                 uint32_t* dib_ptrs = (uint32_t*)tib_buf.buf;
                 
                 // Iterate through Double Indirect Blocks
-                for(int i = 0; i < BLOCK_SIZE/sizeof(uint32_t); i++) {
+                for(uint32_t i = 0; i < BLOCK_SIZE/sizeof(uint32_t); i++) {
                     if(dib_ptrs[i] != 0) {
                         struct BlockBuffer dib_buf;
                         read_blocks(&dib_buf, dib_ptrs[i], 1);
