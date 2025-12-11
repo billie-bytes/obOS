@@ -4,7 +4,6 @@
 static bool speaker_playing = false;
 
 void speaker_init(void) {
-    // Initially turn off the speaker
     speaker_stop();
 }
 
@@ -49,11 +48,6 @@ void speaker_stop(void) {
 
 void speaker_beep(uint32_t frequency, uint32_t duration_ms) {
     speaker_play_tone(frequency);
-    
-    // Simple busy-wait delay
-    // This is not accurate timing but works for basic beep
-    // Approximate: 1ms ≈ 1000 iterations on typical system
-    // Adjust multiplier based on actual CPU speed
     volatile uint32_t delay = duration_ms * 10000;
     while (delay--) {
         __asm__ volatile("nop");
