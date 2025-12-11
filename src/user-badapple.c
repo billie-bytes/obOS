@@ -62,7 +62,7 @@ static inline int8_t fs_readfile(struct EXT2DriverRequest* r, int8_t* rc) {
 #define FRAME_DELAY_MS   40 
 #define CTRL_C_CODE      3 
 
-#define ANIM_BUF_SIZE    (1902340)  /* 1.9 MiB */
+#define ANIM_BUF_SIZE    (2 * 1024 * 1024)  /* 1.9 MiB */
 
 #define ANIM_FILENAME    "badapple.txt"
 #define ANIM_NAME_LEN    12

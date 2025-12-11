@@ -310,8 +310,4 @@ cmd-find: inserter
 insert-commands: cmd-pwd cmd-clear cmd-help cmd-exit cmd-echo cmd-ls cmd-cd cmd-cat cmd-mkdir cmd-ps cmd-kill cmd-exec cmd-grep cmd-find
 	@echo All external commands inserted!
 
-<<<<<<< HEAD
-.PHONY: cmd-pwd cmd-clear cmd-help cmd-exit cmd-echo cmd-ls cmd-cd cmd-cat cmd-mkdir cmd-ps cmd-kill cmd-exec
-=======
 .PHONY: cmd-pwd cmd-clear cmd-help cmd-exit cmd-echo cmd-ls cmd-cd cmd-cat cmd-mkdir cmd-ps cmd-kill cmd-exec cmd-grep cmd-find insert-commands
->>>>>>> 4af004ea047afed0d605fb0b08a0ad935f85b2bf
