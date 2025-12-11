@@ -287,7 +287,27 @@ cmd-exec: inserter
 	@cd $(OUTPUT_FOLDER); ./inserter exec 2 $(DISK_NAME).bin
 	@rm -f *.o
 
-insert-commands: cmd-pwd cmd-clear cmd-help cmd-exit cmd-echo cmd-ls cmd-cd cmd-cat cmd-mkdir cmd-ps cmd-kill cmd-exec
+cmd-grep: inserter
+	@$(ASM) $(AFLAGS) $(CMD_CRT0) -o crt0-cmd.o
+	@$(CC) $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/command/cmd_grep.c -o cmd_grep.o
+	@$(CC) $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/string.c -o string.o
+	@$(LIN) -T $(CMD_LINKER) -melf_i386 --oformat=binary \
+		crt0-cmd.o cmd_grep.o string.o -o $(OUTPUT_FOLDER)/grep
+	@echo Built grep command
+	@cd $(OUTPUT_FOLDER); ./inserter grep 2 $(DISK_NAME).bin
+	@rm -f *.o
+
+cmd-find: inserter
+	@$(ASM) $(AFLAGS) $(CMD_CRT0) -o crt0-cmd.o
+	@$(CC) $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/command/cmd_find.c -o cmd_find.o
+	@$(CC) $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/string.c -o string.o
+	@$(LIN) -T $(CMD_LINKER) -melf_i386 --oformat=binary \
+		crt0-cmd.o cmd_find.o string.o -o $(OUTPUT_FOLDER)/find
+	@echo Built find command
+	@cd $(OUTPUT_FOLDER); ./inserter find 2 $(DISK_NAME).bin
+	@rm -f *.o
+
+insert-commands: cmd-pwd cmd-clear cmd-help cmd-exit cmd-echo cmd-ls cmd-cd cmd-cat cmd-mkdir cmd-ps cmd-kill cmd-exec cmd-grep cmd-find
 	@echo All external commands inserted!
 
-.PHONY: cmd-pwd cmd-clear cmd-help cmd-exit cmd-echo cmd-ls cmd-cd cmd-cat cmd-mkdir cmd-ps cmd-kill cmd-exec insert-commands
+.PHONY: cmd-pwd cmd-clear cmd-help cmd-exit cmd-echo cmd-ls cmd-cd cmd-cat cmd-mkdir cmd-ps cmd-kill cmd-exec cmd-grep cmd-find insert-commands

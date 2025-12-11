@@ -36,6 +36,13 @@ struct EXT2DriverRequest {
 uint32_t current_directory_inode = 2;
 char current_path[256] = "/";
 
+#define MAX_PATH_DIRS 8
+#define MAX_PATH_STR  64
+#define PATH_CONF_FILE "/path.conf"
+
+static char path_dirs[MAX_PATH_DIRS][MAX_PATH_STR];
+static int  path_dir_count = 0;
+
 // Directory traversal helper
 struct DirectoryTraversal {
     uint8_t* base;
@@ -68,6 +75,17 @@ static inline void sys_getchar(char *out) {
 
 static inline void sys_keyboard_activate(void) {
     syscall_do(7u, 0, 0, 0);
+}
+
+static inline char read_key_blocking(void) {
+    char k = 0; 
+    do { sys_getchar(&k); } while (!k); 
+    return k;
+}
+
+static inline int8_t fs_readfile(struct EXT2DriverRequest* r, int8_t* rc) {
+    syscall_do(0, (uint32_t)r, (uint32_t)rc, 0);
+    return *rc;
 }
 
 static inline int8_t fs_readdir(struct EXT2DriverRequest* r, int8_t* rc) {
@@ -253,6 +271,200 @@ static void split_path(const char* in, char* parent_out, char* base_out) {
     strcpy(base_out, last+1);
 }
 
+// PATH management functions
+static void path_clear(void) {
+    path_dir_count = 0;
+}
+
+static int path_index_of(const char *dir) {
+    for (int i = 0; i < path_dir_count; i++) {
+        if (strcmp(path_dirs[i], dir) == 0) return i;
+    }
+    return -1;
+}
+
+static int path_add(const char *dir) {
+    if (!dir || !*dir) return -1;
+    if (path_index_of(dir) >= 0) return 0;
+    if (path_dir_count >= MAX_PATH_DIRS) return -1;
+
+    strncpy(path_dirs[path_dir_count], dir, MAX_PATH_STR - 1);
+    path_dirs[path_dir_count][MAX_PATH_STR - 1] = 0;
+    path_dir_count++;
+    return 0;
+}
+
+static int path_remove(const char *dir) {
+    int idx = path_index_of(dir);
+    if (idx < 0) return -1;
+    for (int i = idx + 1; i < path_dir_count; i++) {
+        strcpy(path_dirs[i - 1], path_dirs[i]);
+    }
+    path_dir_count--;
+    return 0;
+}
+
+static bool get_path_conf_parent(uint32_t *parent_inode_out, char *base_out) {
+    char parent_path[MAX_LINE];
+    split_path(PATH_CONF_FILE, parent_path, base_out);
+    if (strcmp(parent_path, "/") == 0) {
+        *parent_inode_out = 2;
+        return true;
+    }
+    return resolve_path(parent_path, parent_inode_out);
+}
+
+static void save_path_to_disk(void) {
+    uint32_t parent_inode;
+    char base[MAX_LINE];
+
+    if (!get_path_conf_parent(&parent_inode, base)) return;
+
+    uint8_t buf[512];
+    uint32_t pos = 0;
+
+    for (int i = 0; i < path_dir_count; i++) {
+        size_t L = strlen(path_dirs[i]);
+        if (pos + L + 2 >= sizeof(buf)) break;
+        memcpy(buf + pos, path_dirs[i], L);
+        pos += (uint32_t)L;
+        buf[pos++] = '\n';
+    }
+    if (pos == 0) {
+        buf[0] = 0;
+        pos = 1;
+    } else {
+        buf[pos] = 0;
+        pos++;
+    }
+
+    struct EXT2DriverRequest req = {
+        .buf          = buf,
+        .name         = base,
+        .name_len     = (uint8_t)strlen(base),
+        .parent_inode = parent_inode,
+        .buffer_size  = pos,
+        .is_folder    = false
+    };
+    int8_t rc = -1;
+    fs_write(&req, &rc);
+    (void)rc;
+}
+
+static void load_path_from_disk(void) {
+    path_clear();
+
+    uint32_t parent_inode;
+    char base[MAX_LINE];
+
+    if (!get_path_conf_parent(&parent_inode, base)) {
+        path_add("/");
+        return;
+    }
+
+    uint8_t buf[512];
+    struct EXT2DriverRequest req = {
+        .buf          = buf,
+        .name         = base,
+        .name_len     = (uint8_t)strlen(base),
+        .parent_inode = parent_inode,
+        .buffer_size  = sizeof(buf),
+        .is_folder    = false
+    };
+    int8_t rc = -1;
+    fs_readfile(&req, &rc);
+    if (rc != 0) {
+        path_add("/");
+        return;
+    }
+
+    uint32_t i = 0;
+    while (i < sizeof(buf) && buf[i] != 0) {
+        char tmp[MAX_PATH_STR];
+        uint32_t j = 0;
+        while (i < sizeof(buf) && buf[i] != '\n' && buf[i] != 0 && j < MAX_PATH_STR - 1) {
+            tmp[j++] = (char)buf[i++];
+        }
+        tmp[j] = 0;
+        if (j > 0) path_add(tmp);
+        if (i < sizeof(buf) && buf[i] == '\n') i++;
+    }
+
+    if (path_dir_count == 0) {
+        path_add("/");
+    }
+}
+
+static bool try_exec_with_path(const char *cmd) {
+    if (strchr(cmd, '/') != 0) {
+        char cmd_path[MAX_LINE];
+        strncpy(cmd_path, cmd, sizeof(cmd_path) - 1);
+        cmd_path[sizeof(cmd_path) - 1] = 0;
+        
+        char parent_path[MAX_LINE], base[MAX_LINE];
+        split_path(cmd_path, parent_path, base);
+        
+        uint32_t parent_inode;
+        if (cmd_path[0] == '/') {
+            if (strcmp(parent_path, "/") == 0) parent_inode = 2;
+            else if (!resolve_path(parent_path, &parent_inode)) return false;
+        } else {
+            if (strcmp(parent_path, ".") == 0) parent_inode = current_directory_inode;
+            else if (!resolve_path(parent_path, &parent_inode)) return false;
+        }
+        
+        uint32_t process_buffer = (2 * 1024 * 1024);
+        struct EXT2DriverRequest req = {
+            .buf          = (uint8_t*)0,
+            .name         = base,
+            .name_len     = (uint8_t)strlen(base),
+            .parent_inode = parent_inode,
+            .buffer_size  = process_buffer,
+            .is_folder    = false
+        };
+        int32_t res = sys_exec(&req);
+        return (res == 0);
+    }
+    
+    for (int i = 0; i < path_dir_count; i++) {
+        char full[MAX_LINE];
+        strncpy(full, path_dirs[i], MAX_LINE - 1);
+        full[MAX_LINE - 1] = 0;
+
+        size_t L = strlen(full);
+        if (L == 0) continue;
+
+        if (full[L-1] != '/' && L < MAX_LINE - 1) {
+            full[L]   = '/';
+            full[L+1] = 0;
+            L++;
+        }
+
+        if (L + strlen(cmd) >= MAX_LINE) continue;
+        strcat(full, cmd);
+
+        char parent_path[MAX_LINE], base[MAX_LINE];
+        split_path(full, parent_path, base);
+        
+        uint32_t parent_inode;
+        if (strcmp(parent_path, "/") == 0) parent_inode = 2;
+        else if (!resolve_path(parent_path, &parent_inode)) continue;
+        
+        uint32_t process_buffer = (2 * 1024 * 1024);
+        struct EXT2DriverRequest req = {
+            .buf          = (uint8_t*)0,
+            .name         = base,
+            .name_len     = (uint8_t)strlen(base),
+            .parent_inode = parent_inode,
+            .buffer_size  = process_buffer,
+            .is_folder    = false
+        };
+        int32_t res = sys_exec(&req);
+        if (res == 0) return true;
+    }
+    return false;
+}
+
 // Autocomplete
 static int autocomplete(char* buf, int cur_len) {
     int start = 0;
@@ -362,42 +574,6 @@ static int parse_command(char* line, char* argv[], int max_args) {
     return argc;
 }
 
-// Program execution helper
-static int spawn_program_at(const char *prog_path) {
-    char parent_path[MAX_LINE], base[MAX_LINE];
-    split_path(prog_path, parent_path, base);
-
-    uint32_t parent_inode;
-    if (prog_path[0] == '/') {
-        if (strcmp(parent_path, "/") == 0)
-            parent_inode = 2;
-        else if (!resolve_path(parent_path, &parent_inode)) {
-            sys_puts("shell: parent not found\n", 24, COLOR_TXT);
-            return -1;
-        }
-    } else {
-        if (strcmp(parent_path, ".") == 0)
-            parent_inode = current_directory_inode;
-        else if (!resolve_path(parent_path, &parent_inode)) {
-            sys_puts("shell: parent not found\n", 24, COLOR_TXT);
-            return -1;
-        }
-    }
-
-    uint32_t process_buffer = (2 * 1024 * 1024);
-    struct EXT2DriverRequest req = {
-        .buf          = (uint8_t*)0,
-        .name         = base,
-        .name_len     = (uint8_t)strlen(base),
-        .parent_inode = parent_inode,
-        .buffer_size  = process_buffer,
-        .is_folder    = false
-    };
-
-    int32_t res = sys_exec(&req);
-    return res;
-}
-
 // Built-in command implementations (for commands needing argc/argv)
 static void cmd_ls(int argc, char* argv[]) {
     uint32_t target = current_directory_inode;
@@ -493,6 +669,69 @@ static void cmd_echo(int argc, char* argv[]) {
     sys_putchar('\n', COLOR_TXT);
 }
 
+static void cmd_export(int argc, char* argv[]) {
+    if (argc < 2) {
+        sys_puts("export: missing argument\n", 26, COLOR_TXT);
+        sys_puts("usage: export [add|remove|list|clear] [dir]\n", 47, COLOR_TXT);
+        return;
+    }
+    
+    if (strcmp(argv[1], "list") == 0) {
+        if (path_dir_count == 0) {
+            sys_puts("PATH is empty\n", 15, COLOR_TXT);
+            return;
+        }
+        sys_puts("PATH directories:\n", 19, COLOR_TXT);
+        for (int i = 0; i < path_dir_count; i++) {
+            sys_puts("  ", 2, COLOR_TXT);
+            sys_puts(path_dirs[i], strlen(path_dirs[i]), COLOR_TXT);
+            sys_putchar('\n', COLOR_TXT);
+        }
+        return;
+    }
+    
+    if (strcmp(argv[1], "clear") == 0) {
+        path_clear();
+        save_path_to_disk();
+        sys_puts("PATH cleared\n", 14, COLOR_TXT);
+        return;
+    }
+    
+    if (strcmp(argv[1], "add") == 0) {
+        if (argc < 3) {
+            sys_puts("export add: missing directory\n", 31, COLOR_TXT);
+            return;
+        }
+        if (path_add(argv[2]) == 0) {
+            save_path_to_disk();
+            sys_puts("Added to PATH: ", 15, COLOR_TXT);
+            sys_puts(argv[2], strlen(argv[2]), COLOR_TXT);
+            sys_putchar('\n', COLOR_TXT);
+        } else {
+            sys_puts("export add: failed (duplicate or full)\n", 41, COLOR_TXT);
+        }
+        return;
+    }
+    
+    if (strcmp(argv[1], "remove") == 0) {
+        if (argc < 3) {
+            sys_puts("export remove: missing directory\n", 34, COLOR_TXT);
+            return;
+        }
+        if (path_remove(argv[2]) == 0) {
+            save_path_to_disk();
+            sys_puts("Removed from PATH: ", 19, COLOR_TXT);
+            sys_puts(argv[2], strlen(argv[2]), COLOR_TXT);
+            sys_putchar('\n', COLOR_TXT);
+        } else {
+            sys_puts("export remove: not found in PATH\n", 35, COLOR_TXT);
+        }
+        return;
+    }
+    
+    sys_puts("export: unknown subcommand\n", 28, COLOR_TXT);
+}
+
 // Command execution - mix of built-in and external
 static void execute_command(int argc, char* argv[]) {
     if (argc == 0) return;
@@ -505,18 +744,13 @@ static void execute_command(int argc, char* argv[]) {
     if (strcmp(cmd, "ls") == 0) { cmd_ls(argc, argv); return; }
     if (strcmp(cmd, "mkdir") == 0) { cmd_mkdir(argc, argv); return; }
     if (strcmp(cmd, "echo") == 0) { cmd_echo(argc, argv); return; }
+    if (strcmp(cmd, "export") == 0) { cmd_export(argc, argv); return; }
     if (strcmp(cmd, "clear") == 0) { __asm__ volatile("mov $8, %eax; int $0x30"); return; }
     if (strcmp(cmd, "exit") == 0) { __asm__ volatile("mov $21, %eax; int $0x30"); return; }
     
-    // Try external command
-    char cmd_path[MAX_LINE];
-    cmd_path[0] = '/';
-    strncpy(cmd_path + 1, cmd, sizeof(cmd_path) - 2);
-    cmd_path[sizeof(cmd_path) - 1] = 0;
-    
-    int result = spawn_program_at(cmd_path);
-    if (result < 0) {
-        sys_puts("shell: command not found: ", 27, COLOR_TXT);
+    // Try external command with PATH search
+    if (!try_exec_with_path(cmd)) {
+        sys_puts("undefined command: ", 19, COLOR_TXT);
         sys_puts(cmd, strlen(cmd), COLOR_TXT);
         sys_putchar('\n', COLOR_TXT);
     }
@@ -524,50 +758,103 @@ static void execute_command(int argc, char* argv[]) {
 
 // Main shell loop
 int main(void) {
-    sys_keyboard_activate();
-    print_prompt();
-
     char line[MAX_INPUT_LEN];
     char* argv[MAX_ARGS];
+    int argc;
     int len = 0;
-    int argc = 0;
+
+    sys_keyboard_activate();
+    load_path_from_disk();
+    print_prompt();
 
     while (1) {
         char c = 0;
         sys_getchar(&c);
         if (!c) continue;
-
-        // Tab completion
-        if (c == '\t') {
-            len = autocomplete(line, len);
-            continue;
-        }
-
-        // Arrow up
-        if (c == 1) {
-            if (hist_nav < 0) hist_nav = hist_count;
-            if (hist_nav > 0) {
-                hist_nav--;
-                erase_input_line(len);
-                len = history_get(hist_nav, line);
-                sys_puts(line, len, COLOR_INPUT);
+        
+        // ANSI escape sequence for Up/Down (ESC [ A/B)
+        if (c == 0x1B) {
+            char b1 = read_key_blocking();
+            if (b1 == '[') {
+                char b2 = read_key_blocking();
+                if (b2 == 'A' && hist_count > 0) {
+                    if (hist_nav < 0) hist_nav = hist_count - 1; 
+                    else if (hist_nav > 0) hist_nav--;
+                    char tmp[MAX_INPUT_LEN]; 
+                    int hlen = history_get(hist_nav, tmp);
+                    erase_input_line(len);
+                    for (int i=0;i<hlen;i++) line[i] = tmp[i];
+                    len = hlen;
+                    line[len] = 0;
+                    sys_puts(line, len, COLOR_INPUT);
+                    continue;
+                }
+                if (b2 == 'B' && hist_count > 0) {
+                    if (hist_nav >= 0) {
+                        hist_nav++;
+                    }
+                    if (hist_nav >= hist_count) {
+                        hist_nav = -1;
+                    }
+                    erase_input_line(len);
+                    if (hist_nav >= 0) { 
+                        char tmp[MAX_INPUT_LEN]; 
+                        int hlen = history_get(hist_nav, tmp); 
+                        for (int i=0;i<hlen;i++) line[i] = tmp[i]; 
+                        len = hlen; 
+                        line[len] = 0; 
+                        sys_puts(line, len, COLOR_INPUT); 
+                    } else { 
+                        len = 0; 
+                        line[0] = 0; 
+                    }
+                    continue;
+                }
+                continue;
             }
             continue;
         }
-
-        // Arrow down
-        if (c == 2) {
-            if (hist_nav >= 0 && hist_nav < hist_count - 1) {
+        
+        // Direct arrow key codes (0x80 = up, 0x81 = down)
+        if ((unsigned char)c == 0x80 && hist_count > 0) {
+            if (hist_nav < 0) hist_nav = hist_count - 1; 
+            else if (hist_nav > 0) hist_nav--;
+            char tmp[MAX_INPUT_LEN]; 
+            int hlen = history_get(hist_nav, tmp);
+            erase_input_line(len);
+            for (int i=0;i<hlen;i++) line[i] = tmp[i];
+            len = hlen; 
+            line[len] = 0;
+            sys_puts(line, len, COLOR_INPUT);
+            continue;
+        }
+        if ((unsigned char)c == 0x81 && hist_count > 0) {
+            if (hist_nav >= 0) {
                 hist_nav++;
-                erase_input_line(len);
-                len = history_get(hist_nav, line);
-                sys_puts(line, len, COLOR_INPUT);
-            } else if (hist_nav == hist_count - 1) {
+            }
+            if (hist_nav >= hist_count) {
                 hist_nav = -1;
-                erase_input_line(len);
-                len = 0;
+            }
+            erase_input_line(len);
+            if (hist_nav >= 0) { 
+                char tmp[MAX_INPUT_LEN]; 
+                int hlen = history_get(hist_nav, tmp);
+                for (int i=0;i<hlen;i++) line[i] = tmp[i];
+                len = hlen;
+                line[len]=0;
+                sys_puts(line, len, COLOR_INPUT);
+            } else { 
+                len = 0; 
+                line[0]=0; 
             }
             continue;
+        }
+        
+        // Tab completion
+        if (c == '\t') { 
+            len = autocomplete(line, len); 
+            hist_nav = -1; 
+            continue; 
         }
 
         // Backspace
