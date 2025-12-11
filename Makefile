@@ -64,7 +64,7 @@ iso: kernel
 	@cp other/grub1                 $(OUTPUT_FOLDER)/iso/boot/grub/
 	@cp $(SOURCE_FOLDER)/menu.lst   $(OUTPUT_FOLDER)/iso/boot/grub/
 # TODO: Create ISO image
-	@cd $(OUTPUT_FOLDER) && genisoimage -R			   \
+	@cd $(OUTPUT_FOLDER) && genisoimage -R             \
 	-b boot/grub/grub1         \
 	-no-emul-boot              \
 	-boot-load-size 4          \
@@ -79,7 +79,7 @@ iso: kernel
 DISK_NAME = storage
 
 disk:
-	@qemu-img create -f raw $(OUTPUT_FOLDER)/$(DISK_NAME).bin 4M
+	@dd if=/dev/zero of=$(OUTPUT_FOLDER)/$(DISK_NAME).bin bs=1M count=1024
 
 inserter:
 	@$(CC) -Wno-builtin-declaration-mismatch -g -I$(SOURCE_FOLDER) \
@@ -134,7 +134,7 @@ insert-hello: inserter user-hello
 user-beep:
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/crt0.s -o crt0.o
 	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/user-beep.c -o user-beep.o
-	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/string.c -o string.o	
+	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/string.c -o string.o    
 	@$(LIN) -T $(SOURCE_FOLDER)/user-linker.ld -melf_i386 --oformat=binary \
 		crt0.o user-beep.o string.o -o $(OUTPUT_FOLDER)/beep
 	@echo Linking object beep object files and generate flat binary...
@@ -310,4 +310,8 @@ cmd-find: inserter
 insert-commands: cmd-pwd cmd-clear cmd-help cmd-exit cmd-echo cmd-ls cmd-cd cmd-cat cmd-mkdir cmd-ps cmd-kill cmd-exec cmd-grep cmd-find
 	@echo All external commands inserted!
 
+<<<<<<< HEAD
+.PHONY: cmd-pwd cmd-clear cmd-help cmd-exit cmd-echo cmd-ls cmd-cd cmd-cat cmd-mkdir cmd-ps cmd-kill cmd-exec
+=======
 .PHONY: cmd-pwd cmd-clear cmd-help cmd-exit cmd-echo cmd-ls cmd-cd cmd-cat cmd-mkdir cmd-ps cmd-kill cmd-exec cmd-grep cmd-find insert-commands
+>>>>>>> 4af004ea047afed0d605fb0b08a0ad935f85b2bf
