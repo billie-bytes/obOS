@@ -233,6 +233,36 @@ void syscall(struct InterruptFrame frame) {
             // ecx = duration in milliseconds
             speaker_beep(frame.cpu.general.ebx, frame.cpu.general.ecx);
             break;
+        case 21:
+        /* System shutdown (attempt to power off QEMU/Bochs) */
+            __asm__ volatile ("cli");
+            // Try well-known ports for QEMU/Bochs shutdown
+            out16(0xB004, 0x2000);  // Bochs/QEMU old
+            out16(0x0604, 0x2000);  // QEMU (ISA PM)
+            out16(0x4004, 0x3400);  // VirtualBox fallback
+            // If still running, halt forever
+            for (;;) { __asm__ volatile ("hlt"); }
+            break;
+        case 22:
+        /* Get current working directory */
+            // ebx = buffer pointer, ecx = buffer size
+            // Returns: eax = current_directory_inode
+            // For now, always return root inode (2)
+            // TODO: implement per-process cwd in PCB
+            frame.cpu.general.eax = 2; // Root inode
+            if (frame.cpu.general.ebx && frame.cpu.general.ecx > 0) {
+                char *buf = (char*)frame.cpu.general.ebx;
+                buf[0] = '/';
+                buf[1] = '\0';
+            }
+            break;
+        case 23:
+        /* Set current working directory */
+            // ebx = inode, ecx = path string
+            // TODO: implement per-process cwd in PCB
+            // For now, just return success
+            frame.cpu.general.eax = 0;
+            break;
     }
 }
 
