@@ -54,6 +54,9 @@ static struct EXT2Superblock superBlock;
 struct EXT2BlockGroupDescriptorTable b_group_descriptor_table;
 
 
+
+// These were formerly local variables but since they're huge, I made them a global static so that
+// it's not stored in the stack
 static uint8_t raw_p[GDT_SIZE_BLOCKS * BLOCK_SIZE];
 static uint8_t raw_m[GDT_SIZE_BLOCKS * BLOCK_SIZE];
 static uint8_t raw_l[GDT_SIZE_BLOCKS * BLOCK_SIZE];
