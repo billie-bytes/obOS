@@ -623,7 +623,7 @@ static void load_path_from_disk(void) {
     char base[MAX_LINE];
 
     if (!get_path_conf_parent(&parent_inode, base)) {
-        path_add("/bin");
+        path_add("/");
         return;
     }
 
@@ -639,7 +639,7 @@ static void load_path_from_disk(void) {
     int8_t rc = -1;
     fs_readfile(&req, &rc);
     if (rc != 0) {
-        path_add("/bin");
+        path_add("/");
         return;
     }
 
@@ -656,7 +656,7 @@ static void load_path_from_disk(void) {
     }
 
     if (path_dir_count == 0) {
-        path_add("/bin");
+        path_add("/");
     }
 }
 
