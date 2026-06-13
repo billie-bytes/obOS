@@ -1,70 +1,21 @@
 {
-    "version": "0.2.0",
-    "configurations": [
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug OS",
+      "type": "cppdbg",
+      "request": "launch",
+      "MIMode": "gdb",
+      "miDebuggerServerAddress": "localhost:1234",
+      "program": "${workspaceFolder}/bin/kernel",
+      "cwd": "${workspaceFolder}",
+      "setupCommands": [
         {
-            "name": "Kernel",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceRoot}/bin/kernel",
-            "args": [],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/bin",  // ← PENTING: Set working directory ke bin/
-            "environment": [],
-            "externalConsole": false,
-            "MIMode": "gdb",
-            "setupCommands": [
-                {
-                    "description": "Enable pretty-printing for gdb",
-                    "text": "-enable-pretty-printing",
-                    "ignoreFailures": true
-                }
-            ],
-            "preLaunchTask": "Launch QEMU",
-            "postDebugTask": "Exit QEMU",
-            "targetArchitecture": "x86",
-            "customLaunchSetupCommands": [
-                {
-                    "text": "target remote localhost:1234",
-                    "description": "Connect to QEMU remote debugger"
-                },
-                {
-                    "text": "symbol-file ${workspaceFolder}/bin/kernel",  // ← Tambahkan full path
-                    "description": "Get kernel symbols"
-                },
-                {   "text": "add-symbol-file shell_elf", 
-                    "description": "Get shell symbols" 
-                },
-                {
-                    "text": "add-symbol-file ${workspaceFolder}/bin/shell_elf",  // ← Tambahkan full path
-                    "description": "Get shell symbols",
-                    "ignoreFailures": true  // ← Tambahkan ini (jika shell_elf belum ada, skip)
-                },
-                {
-                    "text": "set output-radix 16",
-                    "description": "Use hexadecimal output"
-                }
-            ],
-            "avoidWindowsConsoleRedirection": true
+          "description": "Set architecture to i386",
+          "text": "set architecture i386",
+          "ignoreFailures": false
         },
-        {
-            "name": "Debug Inserter (Local)",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/bin/inserter",
-            "args": ["shell", "2", "storage.bin"],
-            "stopAtEntry": true,
-            "cwd": "${workspaceFolder}/bin",
-            "environment": [],
-            "externalConsole": false,
-            "MIMode": "gdb",
-            // "preLaunchTask": "Build Inserter",
-            "setupCommands": [
-                {
-                    "description": "Enable pretty-printing for gdb",
-                    "text": "-enable-pretty-printing",
-                    "ignoreFailures": true
-                }
-            ]
-        }
-    ]
+                ]
+    }
+  ]
 }
