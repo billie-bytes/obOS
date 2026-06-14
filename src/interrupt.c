@@ -14,8 +14,7 @@ struct TSSEntry _interrupt_tss_entry = {
     .ss0  = GDT_KERNEL_DATA_SEGMENT_SELECTOR,
 };
 
-void syscall(struct InterruptFrame frame);
-
+void syscall(struct InterruptFrame *frame);
 void io_wait(void) {
     out(0x80, 0);
 }
@@ -53,7 +52,7 @@ void pic_remap(void) {
 void main_interrupt_handler(struct InterruptFrame frame) {
     switch (frame.int_number) {
         case 0x30:
-            syscall(frame);
+            syscall(&frame);
             break;
         case (PIC1_OFFSET + IRQ_KEYBOARD):
             keyboard_isr();
@@ -85,60 +84,60 @@ static inline uint32_t ms_to_ticks(uint32_t ms) {
     return (prod + 999u) / 1000u;
 }
 
-void syscall(struct InterruptFrame frame) {
-    switch (frame.cpu.general.eax) {
+void syscall(struct InterruptFrame *frame) {
+    switch (frame->cpu.general.eax) {
         case 0:
         /* read() */
-            if (frame.cpu.general.ecx) {
-                *((int8_t*) frame.cpu.general.ecx) = read(
-                    *(struct EXT2DriverRequest*) frame.cpu.general.ebx
+            if (frame->cpu.general.ecx) {
+                *((int8_t*) frame->cpu.general.ecx) = read(
+                    *(struct EXT2DriverRequest*) frame->cpu.general.ebx
                 );
             }
             break;
         case 1:
         /* read_directory() */
-            if (frame.cpu.general.ecx) {
-                *((int8_t*) frame.cpu.general.ecx) = read_directory(
-                    (struct EXT2DriverRequest*) frame.cpu.general.ebx
+            if (frame->cpu.general.ecx) {
+                *((int8_t*) frame->cpu.general.ecx) = read_directory(
+                    (struct EXT2DriverRequest*) frame->cpu.general.ebx
                 );
             }
             break;
         case 2:
         /* write() */
-            if (frame.cpu.general.ecx) {
-                *((int8_t*) frame.cpu.general.ecx) = write(
-                    *(struct EXT2DriverRequest*) frame.cpu.general.ebx
+            if (frame->cpu.general.ecx) {
+                *((int8_t*) frame->cpu.general.ecx) = write(
+                    *(struct EXT2DriverRequest*) frame->cpu.general.ebx
                 );
             }
             break;
         case 3:
         /* delete() */
-            if (frame.cpu.general.ecx) {
-                *((int8_t*) frame.cpu.general.ecx) = delete(
-                    *(struct EXT2DriverRequest*) frame.cpu.general.ebx
+            if (frame->cpu.general.ecx) {
+                *((int8_t*) frame->cpu.general.ecx) = delete(
+                    *(struct EXT2DriverRequest*) frame->cpu.general.ebx
                 );
             }
             break;
         case 4:
         /* Keyboard I/O getchar() */
-            get_keyboard_buffer((char*) frame.cpu.general.ebx);
+            get_keyboard_buffer((char*) frame->cpu.general.ebx);
             break;
         case 5:
         /* putchar() */
             putchar(
-                (char)(frame.cpu.general.ebx & 0xFF),
-                (uint8_t)(frame.cpu.general.ecx & 0x0F)
+                (char)(frame->cpu.general.ebx & 0xFF),
+                (uint8_t)(frame->cpu.general.ecx & 0x0F)
             );
             break;
         case 6:
         /* puts() */
-            if (frame.cpu.general.ebx) {
-                uint32_t cnt = frame.cpu.general.ecx;
+            if (frame->cpu.general.ebx) {
+                uint32_t cnt = frame->cpu.general.ecx;
                 if (cnt > 2000) cnt = 2000; /* basic clamp */
                 puts(
-                    (char*) frame.cpu.general.ebx, 
+                    (char*) frame->cpu.general.ebx, 
                     cnt, 
-                    (uint8_t)(frame.cpu.general.edx & 0x0F)
+                    (uint8_t)(frame->cpu.general.edx & 0x0F)
                 );
             }
             break;
@@ -156,7 +155,7 @@ void syscall(struct InterruptFrame frame) {
                 struct ProcessControlBlock *pcb = process_get_current_running_pcb_pointer();
                 if (pcb != NULL) {
                     uint64_t now = scheduler_get_ticks();
-                    uint32_t ms = (uint32_t)frame.cpu.general.ebx;
+                    uint32_t ms = (uint32_t)frame->cpu.general.ebx;
                     uint32_t add_ticks = ms_to_ticks(ms);
                     pcb->metadata.wake_tick = now + (uint64_t)add_ticks;
                     pcb->metadata.state = PROCESS_SLEEPING;
@@ -166,62 +165,59 @@ void syscall(struct InterruptFrame frame) {
             break;
         case 10:
         /* Process exit - terminate current process */
-            struct ProcessControlBlock *pcb = process_get_current_running_pcb_pointer();
+            {
+                struct ProcessControlBlock *pcb = process_get_current_running_pcb_pointer();
                 if (pcb != NULL){
                     pcb->metadata.state = PROCESS_TERMINATED;
                     process_manager_state._process_used[pcb->metadata.pid] = false;
                     process_manager_state.active_process_count--;
                     scheduler_switch_to_next_process();
                 }
-            break;
-        case 16:
-        /* Set cursor position: ebx=row, ecx=col */
-            framebuffer_set_cursor((uint8_t)frame.cpu.general.ebx, (uint8_t)frame.cpu.general.ecx);
-            break;
-        case 17:
-        /* Get cursor position: ebx=ptr_row, ecx=ptr_col */
-            if (frame.cpu.general.ebx && frame.cpu.general.ecx) {
-                
             }
             break;
         case 11:
         /* Create new user process */
-            struct EXT2DriverRequest *req = (struct EXT2DriverRequest *)frame.cpu.general.ebx;
-            if (req == NULL) {
-                frame.cpu.general.eax = -1;
-            } else {
-                frame.cpu.general.eax = process_create_user_process(*req);
+            {
+                struct EXT2DriverRequest *req = (struct EXT2DriverRequest *)frame->cpu.general.ebx;
+                if (req == NULL) {
+                    frame->cpu.general.eax = -1;
+                } else {
+                    frame->cpu.general.eax = process_create_user_process(*req);
+                }
             }
             break;
         case 12:
         /* Destroy process by pid */    
-            frame.cpu.general.eax = process_destroy(frame.cpu.general.ebx) ? 0 : -1;
+            frame->cpu.general.eax = process_destroy(frame->cpu.general.ebx) ? 0 : -1;
             break;
         case 13:
         /* Get process info */
-            // ebx = pointer to ProcessInfo
-            // ecx = size of ProcessInfo
-            // eax = number of process info written
-            frame.cpu.general.eax = get_process_info(
-                (ProcessInfo *)frame.cpu.general.ebx,
-                frame.cpu.general.ecx);
+            frame->cpu.general.eax = get_process_info(
+                (ProcessInfo *)frame->cpu.general.ebx,
+                frame->cpu.general.ecx);
             break;
         case 14:
         /* Get CMOS time data */
-            // ebx = pointer to cmos_reader struct
-            cmos_reader *cmos_buf = (cmos_reader *)frame.cpu.general.ebx;
-            *cmos_buf = get_cmos_data();
+            {
+                cmos_reader *cmos_buf = (cmos_reader *)frame->cpu.general.ebx;
+                *cmos_buf = get_cmos_data();
+            }
             break;
         case 15:
         /* Put char at specific position */
-            // ebx = row, ecx = col, edx = char, edi = color
-            framebuffer_write((uint8_t)frame.cpu.general.ebx, (uint8_t)frame.cpu.general.ecx, 
-                             (char)frame.cpu.general.edx, (uint8_t)frame.cpu.index.edi, 0);
+            framebuffer_write((uint8_t)frame->cpu.general.ebx, (uint8_t)frame->cpu.general.ecx, 
+                             (char)frame->cpu.general.edx, (uint8_t)frame->cpu.index.edi, 0);
+            break;
+        case 16:
+        /* Set cursor position: ebx=row, ecx=col */
+            framebuffer_set_cursor((uint8_t)frame->cpu.general.ebx, (uint8_t)frame->cpu.general.ecx);
+            break;
+        case 17:
+        /* Get cursor position */
             break;
         case 18:
         /* Play tone on PC Speaker */
-            // ebx = frequency in Hz
-            speaker_play_tone(frame.cpu.general.ebx);
+            speaker_play_tone(frame->cpu.general.ebx);
             break;
         case 19:
         /* Stop PC Speaker */
@@ -229,51 +225,39 @@ void syscall(struct InterruptFrame frame) {
             break;
         case 20:
         /* Beep on PC Speaker */
-            // ebx = frequency in Hz
-            // ecx = duration in milliseconds
-            speaker_beep(frame.cpu.general.ebx, frame.cpu.general.ecx);
+            speaker_beep(frame->cpu.general.ebx, frame->cpu.general.ecx);
             break;
         case 21:
-        /* System shutdown (attempt to power off QEMU/Bochs) */
+        /* System shutdown */
             __asm__ volatile ("cli");
-            // Try well-known ports for QEMU/Bochs shutdown
-            out16(0xB004, 0x2000);  // Bochs/QEMU old
-            out16(0x0604, 0x2000);  // QEMU (ISA PM)
-            out16(0x4004, 0x3400);  // VirtualBox fallback
-            // If still running, halt forever
+            out16(0xB004, 0x2000); 
+            out16(0x0604, 0x2000); 
+            out16(0x4004, 0x3400); 
             for (;;) { __asm__ volatile ("hlt"); }
             break;
         case 22:
         /* Get current working directory */
-            // ebx = buffer pointer, ecx = buffer size
-            // Returns: eax = current_directory_inode
-            // For now, always return root inode (2)
-            // TODO: implement per-process cwd in PCB
-            frame.cpu.general.eax = 2; // Root inode
-            if (frame.cpu.general.ebx && frame.cpu.general.ecx > 0) {
-                char *buf = (char*)frame.cpu.general.ebx;
+            frame->cpu.general.eax = 2; // Root inode
+            if (frame->cpu.general.ebx && frame->cpu.general.ecx > 0) {
+                char *buf = (char*)frame->cpu.general.ebx;
                 buf[0] = '/';
                 buf[1] = '\0';
             }
             break;
         case 23:
         /* Set current working directory */
-            // ebx = inode, ecx = path string
-            // TODO: implement per-process cwd in PCB
-            // For now, just return success
-            frame.cpu.general.eax = 0;
+            frame->cpu.general.eax = 0;
             break;
         case 24:
-        /* ebx = parent_inode, ecx = name string pointer, edx = out_type pointer */
-            frame.cpu.general.eax = fs_stat(
-                frame.cpu.general.ebx,
-                (char*)frame.cpu.general.ecx,
-                (uint8_t*)frame.cpu.general.edx
+        /* Check existence of file and get the inode */
+            frame->cpu.general.eax = fs_stat(
+                frame->cpu.general.ebx,
+                (char*)frame->cpu.general.ecx,
+                (uint8_t*)frame->cpu.general.edx
             );
             break;
     }
 }
-
 void activate_timer_interrupt(void) {
     __asm__ volatile("cli");
     // Setup how often PIT fire

@@ -140,7 +140,7 @@ void pic_remap(void);
 void main_interrupt_handler(struct InterruptFrame frame);
 void activate_keyboard_interrupt(void);
 void set_tss_kernel_current_stack(void);
-void syscall(struct InterruptFrame frame);
+void syscall(struct InterruptFrame* frame);
 void activate_timer_interrupt(void);
 
 #endif

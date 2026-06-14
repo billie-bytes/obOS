@@ -521,12 +521,10 @@ static int parse_command(char* line, char* argv[], int maxargs) {
 static void execute_command(int argc, char* argv[]) {
     if (argc <= 0) return;
     
-    // Check built-in commands first
     if (strcmp(argv[0], "cd") == 0) cmd_cd(argc, argv);
     else if (strcmp(argv[0], "export") == 0) cmd_export(argc, argv);
     else if (strcmp(argv[0], "exit") == 0) cmd_exit(argc, argv);
     else {
-        // Fallback to external programs
         if (try_exec_with_path(argv) == -1) {
             sys_puts("undefined command: ", 19, COLOR_TXT);
             sys_puts(argv[0], strlen(argv[0]), COLOR_TXT);
@@ -550,7 +548,6 @@ int main(void) {
         sys_getchar(&c);
         if (!c) continue;
         
-        // ANSI escape sequence for Up/Down (ESC [ A/B)
         if (c == 0x1B) {
             char b1 = read_key_blocking();
             if (b1 == '[') {
