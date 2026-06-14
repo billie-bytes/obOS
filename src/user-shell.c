@@ -447,7 +447,6 @@ static int spawn_program_at(const char *prog_path) {
         }
     }
 
-    // NEW LOGIC: Verify the file actually exists using Syscall 24
     uint8_t file_type = 0;
     uint32_t target_inode = find_child(parent_inode, base, &file_type);
     
@@ -469,7 +468,7 @@ static int spawn_program_at(const char *prog_path) {
     return sys_exec(&req);
 }
 
-static int try_exec_with_path(char* argv[]) {
+static int try_exec_with_path(int argc, char* argv[]) {
     const char *cmd = argv[0];
 
     // If command already contains '/', treat it as a direct path
@@ -525,7 +524,7 @@ static void execute_command(int argc, char* argv[]) {
     else if (strcmp(argv[0], "export") == 0) cmd_export(argc, argv);
     else if (strcmp(argv[0], "exit") == 0) cmd_exit(argc, argv);
     else {
-        if (try_exec_with_path(argv) == -1) {
+        if (try_exec_with_path(argc,argv) == -1) {
             sys_puts("undefined command: ", 19, COLOR_TXT);
             sys_puts(argv[0], strlen(argv[0]), COLOR_TXT);
             sys_putchar('\n', COLOR_TXT);

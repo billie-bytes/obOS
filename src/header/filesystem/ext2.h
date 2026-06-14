@@ -56,6 +56,18 @@ struct EXT2DriverRequest
 }__attribute__((packed));
 
 
+struct EXT2ProgramRequest
+{
+    void *buf; 
+    char *name; 
+    uint8_t name_len; 
+    uint32_t parent_inode; 
+    uint32_t buffer_size;
+    uint32_t argc;
+    char** argv; 
+}__attribute__((packed));
+
+
 /**
  * EXT2Superblock: 
  * - https://www.nongnu.org/ext2-doc/ext2.html#superblock
