@@ -1634,3 +1634,27 @@ int8_t read_directory(struct EXT2DriverRequest *prequest){
 
     return 0; //success
 }
+
+
+uint32_t fs_stat(uint32_t parent_inode_num, char* name, uint8_t* out_type) {
+    struct EXT2Inode parent_node;
+    if(read_inode(parent_inode_num, &parent_node) != 1) return 0;
+
+    struct EXT2DirectoryEntry entry;
+    
+    uint32_t blk = get_directory_entry(parent_node, name, EXT2_FT_REG_FILE, &entry);
+    
+    if (blk == BLOCKS_COUNT + 1) {
+        blk = get_directory_entry(parent_node, name, EXT2_FT_DIR, &entry);
+    }
+
+    if (blk == 0 || blk == BLOCKS_COUNT + 1) {
+        return 0; 
+    }
+
+    if (out_type) {
+        *out_type = entry.file_type;
+    }
+    
+    return entry.inode;
+}

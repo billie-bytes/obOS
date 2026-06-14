@@ -1,14 +1,6 @@
 #include "syscall.h"
 #include "../header/stdlib/string.h"
 
-// Syscall 12: Kill process by PID
-static inline int32_t sys_kill(uint32_t pid) {
-    int32_t retval;
-    syscall_do(12, pid, 0, 0);
-    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
-    return retval;
-}
-
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         sys_puts("kill: missing PID\n", 18, COLOR_TXT);

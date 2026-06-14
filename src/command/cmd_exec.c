@@ -4,22 +4,6 @@
 #define MAX_LINE 256
 #define DIRBUF_BYTES (BLOCK_SIZE * 8)
 
-// Syscall 11: Create process (exec)
-static inline int32_t sys_exec(struct EXT2DriverRequest* req) {
-    int32_t retval;
-    syscall_do(11, (uint32_t)req, 0, 0);
-    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
-    return retval;
-}
-
-static inline uint32_t sys_getcwd_inode(void) {
-    uint32_t retval;
-    char buf[256];
-    syscall_do(22, (uint32_t)buf, sizeof(buf), 0);
-    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
-    return retval;
-}
-
 struct DirectoryTraversal {
     uint8_t* base;
     uint32_t size;
@@ -61,9 +45,9 @@ static uint32_t find_child(uint32_t dir_inode, const char* name) {
 }
 
 static bool resolve_path(const char* path, uint32_t* out_inode) {
-    if (!path || !*path) { *out_inode = sys_getcwd_inode(); return true; }
+    if (!path || !*path) { *out_inode = sys_getcwd(NULL, 0); return true; }
     if (strcmp(path, "/") == 0) { *out_inode = 2; return true; }
-    uint32_t cur = (path[0] == '/') ? 2 : sys_getcwd_inode();
+    uint32_t cur = (path[0] == '/') ? 2 : sys_getcwd(NULL, 0);
     char tmp[MAX_LINE]; strncpy(tmp, path, sizeof(tmp)); tmp[sizeof(tmp)-1] = 0;
     char* s = tmp; if (*s == '/') s++;
     for (char* tok = strtok(s, "/"); tok; tok = strtok(NULL, "/")) {
@@ -104,7 +88,7 @@ int main(int argc, char* argv[]) {
             return 1; 
         }
     } else {
-        if (strcmp(parent_path, ".") == 0) parent_inode = sys_getcwd_inode();
+        if (strcmp(parent_path, ".") == 0) parent_inode = sys_getcwd(NULL, 0);
         else if (!resolve_path(parent_path, &parent_inode)) { 
             sys_puts("exec: parent not found\n", 23, COLOR_TXT); 
             return 1; 

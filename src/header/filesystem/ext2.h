@@ -405,4 +405,6 @@ void allocate_node_blocks(void *ptr, struct EXT2Inode *node, uint32_t prefered_b
  */
 void write_node_disk(struct EXT2Inode node, uint32_t inode);
 
+uint32_t fs_stat(uint32_t parent_inode_num, char* name, uint8_t* out_type);
+
 #endif

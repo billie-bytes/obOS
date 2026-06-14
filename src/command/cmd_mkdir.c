@@ -4,14 +4,6 @@
 #define MAX_LINE 256
 #define DIRBUF_BYTES (BLOCK_SIZE * 8)
 
-static inline uint32_t sys_getcwd_inode(void) {
-    uint32_t retval;
-    char buf[256];
-    syscall_do(22, (uint32_t)buf, sizeof(buf), 0);
-    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
-    return retval;
-}
-
 struct DirectoryTraversal {
     uint8_t* base;
     uint32_t size;
@@ -53,9 +45,9 @@ static uint32_t find_child(uint32_t dir_inode, const char* name) {
 }
 
 static bool resolve_path(const char* path, uint32_t* out_inode) {
-    if (!path || !*path) { *out_inode = sys_getcwd_inode(); return true; }
+    if (!path || !*path) { *out_inode = sys_getcwd(NULL, 0); return true; }
     if (strcmp(path, "/") == 0) { *out_inode = 2; return true; }
-    uint32_t cur = (path[0] == '/') ? 2 : sys_getcwd_inode();
+    uint32_t cur = (path[0] == '/') ? 2 : sys_getcwd(NULL, 0);
     char tmp[MAX_LINE]; strncpy(tmp, path, sizeof(tmp)); tmp[sizeof(tmp)-1] = 0;
     char* s = tmp; if (*s == '/') s++;
     for (char* tok = strtok(s, "/"); tok; tok = strtok(NULL, "/")) {
@@ -80,6 +72,7 @@ static void split_path(const char* in, char* parent_out, char* base_out) {
 }
 
 int main(int argc, char* argv[]) {
+    argc = 1;
     if (argc < 2) { sys_puts("mkdir: missing operand\n", 24, COLOR_TXT); return 1; }
     
     char parent_path[MAX_LINE], base[MAX_LINE];
@@ -91,7 +84,7 @@ int main(int argc, char* argv[]) {
         if (strcmp(parent_path, "/") == 0) parent_inode = 2;
         else if (!resolve_path(parent_path, &parent_inode)) { sys_puts("mkdir: parent not found\n", 25, COLOR_TXT); return 1; }
     } else {
-        if (strcmp(parent_path, ".") == 0) parent_inode = sys_getcwd_inode();
+        if (strcmp(parent_path, ".") == 0) parent_inode = sys_getcwd(NULL, 0);
         else if (!resolve_path(parent_path, &parent_inode)) { sys_puts("mkdir: parent not found\n", 25, COLOR_TXT); return 1; }
     }
     

@@ -263,6 +263,14 @@ void syscall(struct InterruptFrame frame) {
             // For now, just return success
             frame.cpu.general.eax = 0;
             break;
+        case 24:
+        /* ebx = parent_inode, ecx = name string pointer, edx = out_type pointer */
+            frame.cpu.general.eax = fs_stat(
+                frame.cpu.general.ebx,
+                (char*)frame.cpu.general.ecx,
+                (uint8_t*)frame.cpu.general.edx
+            );
+            break;
     }
 }
 

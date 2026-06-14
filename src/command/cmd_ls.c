@@ -4,15 +4,6 @@
 #define DIRBUF_BYTES (BLOCK_SIZE * 8)
 #define COLOR_DIR 0x0B
 
-// Get current working directory from syscall 22
-static inline uint32_t get_cwd_inode(void) {
-    uint32_t retval;
-    char buf[256];
-    syscall_do(22, (uint32_t)buf, sizeof(buf), 0);
-    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
-    return retval;
-}
-
 struct DirectoryTraversal {
     uint8_t* base;
     uint32_t size;
@@ -47,7 +38,7 @@ static bool dirwalk_next(struct DirectoryTraversal* it, struct EXT2DirectoryEntr
 
 static bool resolve_path(const char *path, uint32_t *out_inode) {
     if (path[0] == '/' && path[1] == '\0') { *out_inode = 2; return true; }
-    uint32_t inode = (path[0] == '/') ? 2 : get_cwd_inode();
+    uint32_t inode = (path[0] == '/') ? 2 : sys_getcwd(NULL, 0);
     char buf[256]; strncpy(buf, path, 255); buf[255] = 0;
     char* token = buf; if (token[0] == '/') token++;
     while (*token) {
@@ -78,7 +69,7 @@ static bool resolve_path(const char *path, uint32_t *out_inode) {
 }
 
 int main(int argc, char* argv[]) {
-    uint32_t target = get_cwd_inode();
+    uint32_t target = sys_getcwd(NULL, 0);
     if (argc > 2) { sys_puts("ls: too many arguments\n", 24, COLOR_TXT); return 1; }
     if (argc == 2) {
         if (!resolve_path(argv[1], &target)) { 

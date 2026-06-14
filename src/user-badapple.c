@@ -5,43 +5,13 @@
 #include "header/stdlib/string.h"
 #include "header/filesystem/ext2.h"
 #include "header/text/badapple.h"
-
-static inline void syscall_do(uint32_t eax, uint32_t ebx, uint32_t ecx, uint32_t edx) {
-    __asm__ volatile("mov %0, %%ebx" : : "r"(ebx));
-    __asm__ volatile("mov %0, %%ecx" : : "r"(ecx));
-    __asm__ volatile("mov %0, %%edx" : : "r"(edx));
-    __asm__ volatile("mov %0, %%eax" : : "r"(eax));
-    __asm__ volatile("int $0x30");
-}
-
-static inline void sys_putchar(char c, uint8_t color) {
-    syscall_do(5u, (uint32_t)(uint8_t)c, (uint32_t)color, 0u);
-}
-
-static inline void sys_puts(const char *s, uint32_t len, uint8_t color) {
-    syscall_do(6u, (uint32_t)s, len, (uint32_t)color);
-}
-
-static inline void sys_getchar(char *out) {
-    syscall_do(4u, (uint32_t)out, 0, 0);
-}
-
-static inline void sys_keyboard_activate(void) {
-    syscall_do(7u, 0, 0, 0);
-}
-
-static inline void sys_clear_screen(void) {
-    syscall_do(8u, 0, 0, 0);
-}
+#include "command/syscall.h"
 
 static inline void sys_sleep(uint32_t ms) {
     syscall_do(9u, ms, 0, 0);
 }
 
-static inline void sys_exit(void) {
-    syscall_do(10u, 0, 0, 0);
-}
-
+// Retained inline asm here because syscall_do only takes eax, ebx, ecx, edx, but this needs edi
 static inline void sys_putchar_at(uint8_t row, uint8_t col, char c, uint8_t color) {
     __asm__ volatile("mov %0, %%ebx" : : "r"((uint32_t)row));
     __asm__ volatile("mov %0, %%ecx" : : "r"((uint32_t)col));
@@ -49,11 +19,6 @@ static inline void sys_putchar_at(uint8_t row, uint8_t col, char c, uint8_t colo
     __asm__ volatile("mov %0, %%edi" : : "r"((uint32_t)color));
     __asm__ volatile("mov $15, %%eax" : : );
     __asm__ volatile("int $0x30");
-}
-
-static inline int8_t fs_readfile(struct EXT2DriverRequest* r, int8_t* rc) {
-    syscall_do(0u, (uint32_t)r, (uint32_t)rc, 0u);
-    return *rc;
 }
 
 #define COLOR_VIDEO      0x0F 
@@ -75,7 +40,7 @@ static bool check_ctrl_c(void) {
     do {
         sys_getchar(&k);
         if (k == CTRL_C_CODE) {
-            sys_clear_screen();
+            sys_clear();
             sys_exit();
             return true;
         }
@@ -83,7 +48,6 @@ static bool check_ctrl_c(void) {
 
     return false;
 }
-
 
 static void draw_frame(char frame[FRAME_ROWS][FRAME_COLS]) {
     for (uint8_t r = 0; r < FRAME_ROWS; r++) {
@@ -107,7 +71,6 @@ static void clear_frame_buf(char frame[FRAME_ROWS][FRAME_COLS]) {
     }
 }
 
-
 static int load_anim_file(uint32_t *out_size) {
     memset(anim_buf, 0, ANIM_BUF_SIZE);
 
@@ -120,8 +83,7 @@ static int load_anim_file(uint32_t *out_size) {
         .is_folder    = false
     };
 
-    int8_t rc = -1;
-    rc = fs_readfile(&req, &rc);
+    int8_t rc = sys_read(&req);
     if (rc != 0) {
         return rc;
     }
@@ -203,8 +165,7 @@ int badapple_play(void) {
     uint32_t anim_size = 0;
 
     sys_keyboard_activate();
-
-    sys_clear_screen();
+    sys_clear();
 
     int rc = load_anim_file(&anim_size);
     if (rc != 0) {
