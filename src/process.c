@@ -78,7 +78,6 @@ int32_t process_create_user_process(struct EXT2ProgramRequest request) {
     int32_t p_index = process_list_get_inactive_index();
 
     if (p_index < 0){
-        // Tidak ada slot kosong
         retcode = PROCESS_CREATE_FAIL_MAX_PROCESS_EXCEEDED;
         goto exit_cleanup;
     }
@@ -89,6 +88,48 @@ int32_t process_create_user_process(struct EXT2ProgramRequest request) {
     new_pcb->context.page_directory_virtual_addr = paging_create_new_page_directory();
     paging_allocate_user_page_frame(new_pcb->context.page_directory_virtual_addr, (uint8_t *) 0);
     paging_allocate_user_page_frame(new_pcb->context.page_directory_virtual_addr, (uint8_t *) 0xBFFFFFFC);
+    
+    { 
+        /*
+        Local scope of stack manipulation
+        Needed because there is a variable length array
+        (saved_addr) that is forbidden with goto in the
+        same scope
+        */
+        uint32_t esp = 0xBFFFFFFC;
+        uint32_t saved_addr[request.argc];
+        for(uint32_t i = 0; i < request.argc; ++i){
+            if(i==0){
+                
+            }
+            size_t len = strlen(request.argv[i])+1;
+            esp -= len;
+            saved_addr[i] = esp;
+            memcpy((void*)(esp),request.argv[i],len);
+        }
+        if(esp%4!=0) esp -= (esp%4); //Align to 4 bytes
+        
+        // argv[argc] for the null terminator of arguments
+        esp-=4;
+        *((uint32_t*)esp) = 0;
+
+        for(uint32_t i = 0; i < request.argc; ++i){
+            esp-=(sizeof(uint32_t));
+            *((uint32_t*)esp) = saved_addr[request.argc-(i+1)];
+        }
+
+        esp-=4;
+        *((uint32_t*)esp) = esp+4;
+
+        esp-=4;
+        *((uint32_t*)esp) = request.argc;
+
+        esp-=4;
+        *((uint32_t*)esp) = 0;
+    }
+
+
+
 
     // Copy request.name to local buffer before switching page directory
     char name_buffer[PROCESS_NAME_LENGTH_MAX];
