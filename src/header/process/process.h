@@ -55,7 +55,6 @@
  */
 
 struct Context {
-    // TODO: Add important field here
     struct CPURegister cpu; /* 0x30 */
     uint32_t eip;           /* 0x30 -- 0x34 */
     uint32_t cs;            /* 0x34 -- 0x38 */
@@ -122,7 +121,7 @@ struct ProcessControlBlock* process_get_current_running_pcb_pointer(void);
  * @param request Appropriate read request for the executable
  * @return        Process creation return code
  */
-int32_t process_create_user_process(struct EXT2DriverRequest request);
+int32_t process_create_user_process(struct EXT2ProgramRequest request);
 
 // uint32_t process_list_get_inactive_index();
 

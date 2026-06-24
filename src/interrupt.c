@@ -178,7 +178,7 @@ void syscall(struct InterruptFrame *frame) {
         case 11:
         /* Create new user process */
             {
-                struct EXT2DriverRequest *req = (struct EXT2DriverRequest *)frame->cpu.general.ebx;
+                struct EXT2ProgramRequest *req = (struct EXT2ProgramRequest *)frame->cpu.general.ebx;
                 if (req == NULL) {
                     frame->cpu.general.eax = -1;
                 } else {

@@ -61,7 +61,7 @@ static inline void sys_exit(void) {
 }
 
 // Process Management Syscalls
-static inline int32_t sys_exec(struct EXT2DriverRequest* req) {
+static inline int32_t sys_exec(struct EXT2ProgramRequest* req) {
     int32_t retval;
     syscall_do(11, (uint32_t)req, 0, 0);
     __asm__ volatile("mov %%eax, %0" : "=r"(retval));

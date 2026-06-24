@@ -19,7 +19,6 @@ void initialize_idt(void) {
     // Allow user mode to invoke syscall via int 0x30 (DPL=3)
     set_interrupt_gate(0x30, isr_stub_table[0x30], GDT_KERNEL_CODE_SEGMENT_SELECTOR, 3);
     /* 
-     * TODO: 
      * Iterate all isr_stub_table,
      * Set all IDT entry with set_interrupt_gate()
      * with following values:
@@ -41,7 +40,7 @@ void set_interrupt_gate(
     struct IDTGate *idt_int_gate = &interrupt_descriptor_table.table[int_vector];
     uint32_t addr = (uint32_t) handler_address;
 
-    /* TODOs: handler offset, privilege, segment */
+    /* handler offset, privilege, segment */
     idt_int_gate->offset_low  = (uint16_t) (addr & 0xFFFF);
     idt_int_gate->offset_high = (uint16_t) ((addr >> 16) & 0xFFFF);
     idt_int_gate->segment     = gdt_seg_selector;

@@ -27,13 +27,14 @@ void kernel_setup(void) {
 
     paging_allocate_user_page_frame(&_paging_kernel_page_directory, (uint8_t*) 0);
     // Write shell into memory
-    struct EXT2DriverRequest request = {
+    struct EXT2ProgramRequest request = {
         .buf         = (uint8_t*) 0,
         .name        = "shell",
         .name_len    = 5,
-        .parent_inode= 2,        // root directory inode (adjust if book expects 1)
+        .parent_inode= 2, //Root directory inode
         .buffer_size = 0x100000,
-        .is_folder   = false,
+        .argc = 0,
+        .argv = NULL
     };
 
     // Set TSS.esp0 for interprivilege interrupt
