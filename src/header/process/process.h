@@ -65,7 +65,6 @@ struct Context {
 };
 
 typedef enum PROCESS_STATE {
-    // TODO: Add process states
     PROCESS_TERMINATED,
     PROCESS_RUNNING,
     PROCESS_READY,
