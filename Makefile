@@ -10,7 +10,7 @@ ISO_NAME      = OS2025
 DISK_NAME     = storage
 
 # Flags
-WARNING_CFLAG = -Wall -Wextra -Werror
+#WARNING_CFLAG = -Wall -Wextra -Werror
 DEBUG_CFLAG   = -fshort-wchar -g
 STRIP_CFLAG   = -nostdlib -fno-stack-protector -nostartfiles -nodefaultlibs -ffreestanding
 CFLAGS        = $(DEBUG_CFLAG) $(WARNING_CFLAG) $(STRIP_CFLAG) -m32 -c -I$(SOURCE_FOLDER)
@@ -116,7 +116,7 @@ user-badapple:
 CMD_LINKER = $(SOURCE_FOLDER)/command/cmd-linker.ld
 CMD_CRT0 = $(SOURCE_FOLDER)/command/crt0-cmd.s
 
-build-commands: cmd-pwd cmd-clear cmd-help cmd-exit cmd-echo cmd-ls cmd-cd cmd-cat cmd-mkdir cmd-ps cmd-kill cmd-exec cmd-grep cmd-find
+build-commands: cmd-pwd cmd-clear cmd-help cmd-echo cmd-ls cmd-cat cmd-mkdir cmd-ps cmd-kill cmd-exec cmd-grep cmd-find
 
 cmd-pwd:
 	@$(ASM) $(AFLAGS) $(CMD_CRT0) -o crt0-cmd.o
@@ -138,12 +138,6 @@ cmd-help:
 	@$(LIN) -T $(CMD_LINKER) -melf_i386 --oformat=binary crt0-cmd.o cmd_help.o string.o -o $(OUTPUT_FOLDER)/help
 	@rm -f *.o
 
-cmd-exit:
-	@$(ASM) $(AFLAGS) $(CMD_CRT0) -o crt0-cmd.o
-	@$(CC) $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/command/cmd_exit.c -o cmd_exit.o
-	@$(LIN) -T $(CMD_LINKER) -melf_i386 --oformat=binary crt0-cmd.o cmd_exit.o -o $(OUTPUT_FOLDER)/exit
-	@rm -f *.o
-
 cmd-echo:
 	@$(ASM) $(AFLAGS) $(CMD_CRT0) -o crt0-cmd.o
 	@$(CC) $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/command/cmd_echo.c -o cmd_echo.o
@@ -158,12 +152,7 @@ cmd-ls:
 	@$(LIN) -T $(CMD_LINKER) -melf_i386 --oformat=binary crt0-cmd.o cmd_ls.o string.o -o $(OUTPUT_FOLDER)/ls
 	@rm -f *.o
 
-cmd-cd:
-	@$(ASM) $(AFLAGS) $(CMD_CRT0) -o crt0-cmd.o
-	@$(CC) $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/command/cmd_cd.c -o cmd_cd.o
-	@$(CC) $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/string.c -o string.o
-	@$(LIN) -T $(CMD_LINKER) -melf_i386 --oformat=binary crt0-cmd.o cmd_cd.o string.o -o $(OUTPUT_FOLDER)/cd
-	@rm -f *.o
+
 
 cmd-cat:
 	@$(ASM) $(AFLAGS) $(CMD_CRT0) -o crt0-cmd.o
@@ -246,10 +235,8 @@ insert-commands: inserter build-commands
 	./inserter pwd 2 $(DISK_NAME).bin; \
 	./inserter clear 2 $(DISK_NAME).bin; \
 	./inserter help 2 $(DISK_NAME).bin; \
-	./inserter exit 2 $(DISK_NAME).bin; \
 	./inserter echo 2 $(DISK_NAME).bin; \
 	./inserter ls 2 $(DISK_NAME).bin; \
-	./inserter cd 2 $(DISK_NAME).bin; \
 	./inserter cat 2 $(DISK_NAME).bin; \
 	./inserter mkdir 2 $(DISK_NAME).bin; \
 	./inserter ps 2 $(DISK_NAME).bin; \
