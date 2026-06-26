@@ -89,47 +89,18 @@ int32_t process_create_user_process(struct EXT2ProgramRequest request) {
     paging_allocate_user_page_frame(new_pcb->context.page_directory_virtual_addr, (uint8_t *) 0);
     paging_allocate_user_page_frame(new_pcb->context.page_directory_virtual_addr, (uint8_t *) 0xBFFFFFFC);
     
-    { 
-        /*
-        Local scope of stack manipulation
-        Needed because there is a variable length array
-        (saved_addr) that is forbidden with goto in the
-        same scope
-        */
-        uint32_t esp = 0xBFFFFFFC;
-        uint32_t saved_addr[request.argc];
-        for(uint32_t i = 0; i < request.argc; ++i){
-            if(i==0){
-                
-            }
-            size_t len = strlen(request.argv[i])+1;
-            esp -= len;
-            saved_addr[i] = esp;
-            memcpy((void*)(esp),request.argv[i],len);
-        }
-        if(esp%4!=0) esp -= (esp%4); //Align to 4 bytes
-        
-        // argv[argc] for the null terminator of arguments
-        esp-=4;
-        *((uint32_t*)esp) = 0;
+    
+    // Buffer the arguments in kernel space before switching page directory
+    // (This ensures we can still read request.argv from the old user process)
+    char kernel_argv_buffer[16][128]; // Arbitrary max 16 arguments, 128 chars each
+    uint32_t kernel_argc = request.argc > 16 ? 16 : request.argc;
 
-        for(uint32_t i = 0; i < request.argc; ++i){
-            esp-=(sizeof(uint32_t));
-            *((uint32_t*)esp) = saved_addr[request.argc-(i+1)];
-        }
-
-        esp-=4;
-        *((uint32_t*)esp) = esp+4;
-
-        esp-=4;
-        *((uint32_t*)esp) = request.argc;
-
-        esp-=4;
-        *((uint32_t*)esp) = 0;
+    for (uint32_t i = 0; i < kernel_argc; i++) {
+        uint32_t len = strlen(request.argv[i]);
+        if (len > 127) len = 127;
+        memcpy(kernel_argv_buffer[i], request.argv[i], len);
+        kernel_argv_buffer[i][len] = '\0';
     }
-
-
-
 
     // Copy request.name to local buffer before switching page directory
     char name_buffer[PROCESS_NAME_LENGTH_MAX];
@@ -141,8 +112,57 @@ int32_t process_create_user_process(struct EXT2ProgramRequest request) {
     request.name = name_buffer;
     request.name_len = copy_len;
 
+    // Switch to the new process's map
     struct PageDirectory *old_page_directory = paging_get_current_page_directory_addr();
     paging_use_page_directory(new_pcb->context.page_directory_virtual_addr);
+
+    // only now it is safe to manipulate the stack at 0xBFFFFFFC
+    uint32_t final_esp = 0xBFFFFFFC;
+    { 
+        uint32_t esp = 0xBFFFFFFC;
+        uint32_t saved_addr[16];
+        
+        for(uint32_t i = 0; i < kernel_argc; ++i){
+            size_t len = strlen(kernel_argv_buffer[i]) + 1;
+            esp -= len;
+            saved_addr[i] = esp;
+            memcpy((void*)(esp), kernel_argv_buffer[i], len);
+        }
+        
+        // Calculate exactly how many bytes we are about to push for the pointers/args
+        // (null term) + (argc * 4) (pointers) + 4 (argv ptr) + 4 (argc) + 4 (ret addr)
+        uint32_t push_bytes = 16 + (kernel_argc * 4);
+        
+        // (final_esp + 4) is a multiple of 16. This prevents GCC SSE instructions from crashing.
+        while ((esp - push_bytes + 4) % 16 != 0) {
+            esp--;
+        }
+        
+        // argv[argc] null terminator
+        esp -= 4;
+        *((uint32_t*)esp) = 0;
+
+        // argv pointers (pushed backwards so argv[0] is at lowest memory)
+        for(uint32_t i = 0; i < kernel_argc; ++i){
+            esp -= (sizeof(uint32_t));
+            *((uint32_t*)esp) = saved_addr[kernel_argc - (i + 1)];
+        }
+
+        // pointer to where argv was stored in the stack 
+        esp -= 4;
+        *((uint32_t*)esp) = esp + 4;
+
+        // argc parameter
+        esp -= 4;
+        *((uint32_t*)esp) = kernel_argc;
+
+        // fake ret address
+        esp -= 4;
+        *((uint32_t*)esp) = 0;
+        
+        final_esp = esp; 
+    }
+
 
     struct EXT2DriverRequest r = {
         .buf = request.buf,
@@ -169,12 +189,13 @@ int32_t process_create_user_process(struct EXT2ProgramRequest request) {
     new_pcb->context.cpu.segment.fs = 0x20 | 0x3;
     new_pcb->context.cpu.segment.gs = 0x20 | 0x3;
     
-    new_pcb->context.cpu.stack.ebp = 0xBFFFFFFC;
-    new_pcb->context.cpu.stack.esp = 0xBFFFFFFC;
+    // Assign the dynamically calculated stack pointer instead of the hardcoded top
+    new_pcb->context.cpu.stack.ebp = final_esp;
+    new_pcb->context.cpu.stack.esp = final_esp;
+    new_pcb->context.esp = final_esp;
     
     new_pcb->context.eip = 0x0;
     new_pcb->context.cs = 0x18 | 0x3;
-    new_pcb->context.esp = 0xBFFFFFFC;
     new_pcb->context.ss = 0x20 | 0x3;
     
     new_pcb->context.eflags = CPU_EFLAGS_BASE_FLAG | CPU_EFLAGS_FLAG_INTERRUPT_ENABLE;

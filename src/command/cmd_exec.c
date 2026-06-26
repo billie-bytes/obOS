@@ -96,13 +96,14 @@ int main(int argc, char* argv[]) {
     }
     
     uint32_t process_buffer = (2 * 1024 * 1024);
-    struct EXT2DriverRequest req = {
-        .buf = (uint8_t*)0,
-        .name = base,
-        .name_len = (uint8_t)strlen(base),
+    struct EXT2ProgramRequest req = {
+        .buf          = (uint8_t*)0,
+        .name         = base,
+        .name_len     = (uint8_t)strlen(base),
         .parent_inode = parent_inode,
-        .buffer_size = process_buffer,
-        .is_folder = false
+        .buffer_size  = process_buffer,
+        .argc         = argc - 1,
+        .argv         = &argv[1]
     };
     
     int32_t res = sys_exec(&req);

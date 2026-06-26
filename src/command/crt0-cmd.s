@@ -3,19 +3,11 @@ extern main
 
 section .text
 _start:
-    ; Kernel stack setup:
-    ; ESP -> argc
-    ; ESP+4 -> argv[0] 
-    ; ESP+8 -> argv[1]
-    ; ...
-    ; ESP+4*(argc+1) -> NULL
-    
-    ; Base pointer
     mov ebp, esp
     
-    ; Get argc and argv from stack
-    mov eax, [esp]      ; argc
-    lea ebx, [esp + 4]  ; argv
+    ; The kernel pushed: [esp]=fake_ret, [esp+4]=argc, [esp+8]=argv_ptr
+    mov eax, [esp + 4]  ; Grab actual argc
+    mov ebx, [esp + 8]  ; Grab actual argv pointer
     
     ; Push arguments for main(int argc, char* argv[])
     push ebx            ; argv

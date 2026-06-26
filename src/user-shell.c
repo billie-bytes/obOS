@@ -427,7 +427,7 @@ static void cmd_exit(int argc, char* argv[]) {
 
 // ==== External Execution ====
 
-static int spawn_program_at(const char *prog_path) {
+static int spawn_program_at(const char *prog_path, uint32_t argc, char** argv) {
     char parent_path[MAX_LINE], base[MAX_LINE];
     split_path(prog_path, parent_path, base);
 
@@ -456,24 +456,26 @@ static int spawn_program_at(const char *prog_path) {
     }
 
     uint32_t process_buffer = (2 * 1024 * 1024);
-    struct EXT2DriverRequest req = {
+    
+    struct EXT2ProgramRequest req = {
         .buf          = (uint8_t*)0,
         .name         = base,
         .name_len     = (uint8_t)strlen(base),
         .parent_inode = parent_inode,
         .buffer_size  = process_buffer,
-        .is_folder    = false
+        .argc         = argc,
+        .argv         = argv
     };
-
     return sys_exec(&req);
 }
 
 static int try_exec_with_path(int argc, char* argv[]) {
+
     const char *cmd = argv[0];
 
     // If command already contains '/', treat it as a direct path
     if (strchr(cmd, '/') != 0) {
-        return spawn_program_at(cmd);
+        return spawn_program_at(cmd, argc, argv);
     }
     
     for (int i = 0; i < path_dir_count; i++) {
@@ -493,7 +495,7 @@ static int try_exec_with_path(int argc, char* argv[]) {
         if (L + strlen(cmd) >= MAX_LINE) continue;
         strcat(full, cmd);
 
-        if (spawn_program_at(full) != -1) {
+        if (spawn_program_at(full,argc,argv) != -1) {
             return 1; // Success
         }
     }
@@ -512,8 +514,9 @@ static int parse_command(char* line, char* argv[], int maxargs) {
         argv[n++] = p;
         while (*p && *p != ' ' && *p != '\t') p++;
         if (*p) { *p = 0; p++; }
-        if (n == maxargs) break;
+        if (n == maxargs - 1) break;
     }
+    argv[n] = NULL;
     return n;
 }
 
@@ -625,8 +628,17 @@ int main(void) {
         if (c == '\r' || c == '\n') {
             sys_putchar('\n', COLOR_INPUT);
             line[len] = 0;
+            
+            char original_line[MAX_INPUT_LEN];
+            for (int i = 0; i <= len; i++) {
+                original_line[i] = line[i];
+            }
+            
             argc = parse_command(line, argv, MAX_ARGS);
-            if (argc > 0) { execute_command(argc, argv); history_add(line, len); }
+            if (argc > 0) { 
+                execute_command(argc, argv); 
+                history_add(original_line, len);
+            }
             len = 0;
             print_prompt();
             continue;

@@ -27,14 +27,17 @@ void kernel_setup(void) {
 
     paging_allocate_user_page_frame(&_paging_kernel_page_directory, (uint8_t*) 0);
     // Write shell into memory
+
+    char name[] = "shell";
+    char* argv[] = {name};
     struct EXT2ProgramRequest request = {
         .buf         = (uint8_t*) 0,
-        .name        = "shell",
+        .name        = name,
         .name_len    = 5,
         .parent_inode= 2, //Root directory inode
         .buffer_size = 0x100000,
-        .argc = 0,
-        .argv = NULL
+        .argc = 1,
+        .argv = argv
     };
 
     // Set TSS.esp0 for interprivilege interrupt

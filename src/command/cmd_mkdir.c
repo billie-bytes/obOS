@@ -72,8 +72,10 @@ static void split_path(const char* in, char* parent_out, char* base_out) {
 }
 
 int main(int argc, char* argv[]) {
-    argc = 1;
-    if (argc < 2) { sys_puts("mkdir: missing operand\n", 24, COLOR_TXT); return 1; }
+    if (argc < 2) { 
+        sys_puts("mkdir: missing operand\n", 24, COLOR_TXT); 
+        return 1; 
+    }
     
     char parent_path[MAX_LINE], base[MAX_LINE];
     split_path(argv[1], parent_path, base);
