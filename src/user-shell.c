@@ -34,7 +34,7 @@ static inline char read_key_blocking(void) {
 }
 
 static void print_prompt(void) {
-    sys_puts("jOSh@OS-IF2230", 14, COLOR_PROMPT_USER);
+    sys_puts("root@obOS", 9, COLOR_PROMPT_USER);
     sys_puts(":", 1, COLOR_PROMPT_SEP);
     sys_puts(current_path, strlen(current_path), COLOR_PROMPT_USER);
     sys_puts("$ ", 2, COLOR_PROMPT_SEP);
@@ -384,7 +384,16 @@ static void cmd_cd(int argc, char* argv[]) {
     
     // Update path string
     if (argv[1][0] == '/') {
-        strncpy(current_path, argv[1], 255);
+
+        // Handle edgecase of "//////folder" pathname
+        char* new_path;
+        {
+            uint32_t i = 0;
+            while(argv[1][i]=='/') ++i;
+            if(argv[1][i]=='\0') new_path = argv[1];
+            else new_path = &argv[1][i-1];
+        }
+        strncpy(current_path, new_path, 255);
         current_path[255] = 0;
     } else if (strcmp(argv[1], "..") == 0) {
         size_t len = strlen(current_path);
@@ -477,6 +486,8 @@ static int try_exec_with_path(int argc, char* argv[]) {
     if (strchr(cmd, '/') != 0) {
         return spawn_program_at(cmd, argc, argv);
     }
+
+
     
     for (int i = 0; i < path_dir_count; i++) {
         char full[MAX_LINE];
