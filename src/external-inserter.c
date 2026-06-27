@@ -3,9 +3,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "header/filesystem/ext2.h"
-#include "header/driver/disk.h"
-#include "header/stdlib/string.h"
+#include "kernel/ext2.h"
+#include "kernel/disk.h"
+#include "lib/string.h"
 
 
 // 1GB Disk / 1024B Block = 1,048,576 Blocks
