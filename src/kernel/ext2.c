@@ -521,53 +521,32 @@ void init_directory_table(struct EXT2Inode *node, uint32_t inode, uint32_t paren
  * @param entry the address where we store the entry if we do find the entry we're searching
  * @return offset of the entry inside the block
  */
-static int32_t find_dir_entry_in_block(struct BlockBuffer b, char* name, struct EXT2DirectoryEntry* entry, uint8_t file_type){
-    uint16_t name_len = (uint16_t)strlen(name);
-    
-    char curr_name[256];
-    uint16_t curr_rec_len;
-    uint16_t curr_name_len;
-    uint8_t curr_file_type;
+static int32_t find_dir_entry_in_block(struct BlockBuffer b, char* name, struct EXT2DirectoryEntry* entry, uint8_t file_type) {
+    uint16_t target_name_len = (uint16_t)strlen(name);
+    uint32_t offset = 0;
 
-    int rec_len_offset = 4; //rec_len is always stored in the 4th-5th byte for the first entry in a block
-    int name_len_offset = 6; //name_len is stored in 6th-7th byte for the first entry
-    int name_offset = 9; //name is stored in the 9th up until the name_len specified
-
-    bool lastEntry = false;
-    while(!lastEntry && !(((rec_len_offset-4)+curr_rec_len)>BLOCK_SIZE)){
+    while (offset < BLOCK_SIZE) {
+        // Cast the current memory address directly to the struct
+        struct EXT2DirectoryEntry *curr = (struct EXT2DirectoryEntry *)&b.buf[offset];
         
-        /*Zero-out the memory after each loop*/
-        memset((void* )curr_name, 0, 200);
-        curr_name_len = 0;
-        curr_rec_len = 0;
-
-        /*Copy the values from the block*/
-        // Note: Using explicit memcpy to avoid alignment issues
-        memcpy((void*)&curr_rec_len, (void*)&b.buf[rec_len_offset], sizeof(uint16_t));
-        memcpy((void*)&curr_name_len, (void*)&b.buf[name_len_offset], sizeof(uint16_t));
-        memcpy((void*)&curr_file_type, (void*)&b.buf[name_len_offset+2], sizeof(uint8_t)); // Offset 8
-        
-        // Safety check to prevent buffer overflow if name is corrupted
-        if (curr_name_len > 255) curr_name_len = 255; 
-        memcpy((void*)curr_name, (void*)&b.buf[name_offset], curr_name_len);
-        
-        // Fixed: Changed bitwise & to logical &&
-        if(!strncmp(name, curr_name, curr_name_len) && (name_len==curr_name_len) && (file_type==curr_file_type)){ 
-            // Found it!
-            memcpy((void*)entry, (void*)&b.buf[rec_len_offset-4], (rec_len_offset-4)+(curr_name_len+DIR_SIZE));
-            return rec_len_offset-4;
+        // Safety checks: End of directory block or corrupted rec_len
+        if (curr->rec_len == 0 || offset + curr->rec_len > BLOCK_SIZE) {
+            break;
         }
 
-        if(((rec_len_offset-4)+curr_rec_len)==BLOCK_SIZE){
-            lastEntry = true;
+        // Check if entry is active (inode != 0) and metadata matches
+        if (curr->inode != 0 && curr->name_len == target_name_len && curr->file_type == file_type) {
+            if (strncmp(name, curr->name, target_name_len) == 0) {
+                uint16_t copy_size = DIR_SIZE + curr->name_len; 
+                memcpy((void*)entry, (void*)curr, copy_size);
+                return offset;
+            }
         }
-        if (curr_rec_len == 0) return -1;
-        rec_len_offset = rec_len_offset + curr_rec_len;
-        name_len_offset = name_len_offset + curr_rec_len;
-        name_offset = name_offset + curr_rec_len;
+        
+        offset += curr->rec_len;
     }
 
-    return -1; //entry not found in this block
+    return -1;
 }
 
 /**

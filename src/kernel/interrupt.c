@@ -85,19 +85,21 @@ static inline uint32_t ms_to_ticks(uint32_t ms) {
     return (prod + 999u) / 1000u;
 }
 
-bool kernel_resolve_path(const char* target, uint32_t* out_inode, char* out_path) {
+// Add 'uint8_t* out_type' to the signature
+bool kernel_resolve_path(const char* target, uint32_t* out_inode, char* out_path, uint8_t* out_type) {
     char path_copy[256];
     strncpy(path_copy, target, 255);
     path_copy[255] = '\0';
 
     uint32_t current_inode = (path_copy[0] == '/') ? 2 : cwd_inode;
+    uint8_t current_type = EXT2_FT_DIR;
     char new_path[256];
     
     if (path_copy[0] == '/') strcpy(new_path, "/");
     else strcpy(new_path, global_cwd_path);
 
     char* p = path_copy;
-    while (*p == '/') p++; // Skip leading slashes
+    while (*p == '/') p++;
 
     while (*p) {
         char* end = p;
@@ -107,13 +109,10 @@ bool kernel_resolve_path(const char* target, uint32_t* out_inode, char* out_path
 
         if (strlen(p) > 0 && strcmp(p, ".") != 0) {
             if (strcmp(p, "..") == 0) {
-                // Traverse Up
-                uint8_t type;
-                uint32_t up_inode = fs_stat(current_inode, "..", &type);
+                uint32_t up_inode = fs_stat(current_inode, "..", &current_type);
                 if (!up_inode) return false;
                 current_inode = up_inode;
 
-                // Strip last directory from string
                 size_t len = strlen(new_path);
                 if (len > 1) {
                     if (new_path[len-1] == '/') len--;
@@ -123,8 +122,7 @@ bool kernel_resolve_path(const char* target, uint32_t* out_inode, char* out_path
                 }
             } else {
                 // Traverse Down
-                uint8_t type;
-                uint32_t next_inode = fs_stat(current_inode, p, &type);
+                uint32_t next_inode = fs_stat(current_inode, p, &current_type);
                 if (!next_inode) return false;
                 current_inode = next_inode;
 
@@ -135,10 +133,11 @@ bool kernel_resolve_path(const char* target, uint32_t* out_inode, char* out_path
         
         if (last) break;
         p = end + 1;
-        while (*p == '/') p++; // Skip multiple slashes
+        while (*p == '/') p++;
     }
 
     *out_inode = current_inode;
+    if (out_type) *out_type = current_type;
     strcpy(out_path, new_path);
     return true;
 }
@@ -320,11 +319,11 @@ void syscall(struct InterruptFrame *frame) {
                 const char* target_path = (char*)frame->cpu.general.ebx;
                 uint32_t new_inode;
                 char new_string_path[256];
+                uint8_t type = 0;
 
-                if (kernel_resolve_path(target_path, &new_inode, new_string_path)) {
-                    uint8_t type = 0;
-                    // Confirm it is actually a directory
-                    if (fs_stat(new_inode, ".", &type) && type == EXT2_FT_DIR) {
+                // Pass '&type' directly into our updated resolver
+                if (kernel_resolve_path(target_path, &new_inode, new_string_path, &type)) {
+                    if (type == EXT2_FT_DIR) {
                         cwd_inode = new_inode;
                         strcpy(global_cwd_path, new_string_path);
                         frame->cpu.general.eax = 0; // Success
@@ -332,7 +331,7 @@ void syscall(struct InterruptFrame *frame) {
                         frame->cpu.general.eax = -1; // ENOTDIR
                     }
                 } else {
-                    frame->cpu.general.eax = -1; // ENOENT
+                    frame->cpu.general.eax = -2; // ENOENT
                 }
             }
             break;
@@ -341,13 +340,16 @@ void syscall(struct InterruptFrame *frame) {
         /* POSIX stat (Simplified): Get inode by full/relative path string */
             {
                 const char* target_path = (char*)frame->cpu.general.ebx;
-                uint8_t* out_type = (uint8_t*)frame->cpu.general.ecx;
+                uint8_t* out_type_ptr = (uint8_t*)frame->cpu.general.ecx;
                 uint32_t target_inode;
                 char dummy_path[256];
+                uint8_t resolved_type = 0;
                 
-                if (kernel_resolve_path(target_path, &target_inode, dummy_path)) {
-                    if (out_type) {
-                        fs_stat(target_inode, ".", out_type);
+                // Pass '&resolved_type' directly into our updated resolver
+                if (kernel_resolve_path(target_path, &target_inode, dummy_path, &resolved_type)) {
+                    if (out_type_ptr) {
+                        // Write it directly to user memory, avoiding fs_stat(".", ...)
+                        *out_type_ptr = resolved_type;
                     }
                     frame->cpu.general.eax = target_inode; // Returns the valid inode
                 } else {

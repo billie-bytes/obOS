@@ -10,10 +10,11 @@
  * @param ebx The first argument passed to the syscall.
  * @param ecx The second argument passed to the syscall.
  * @param edx The third argument passed to the syscall.
- * @return None (Register states are modified by the kernel).
+ * @return Returns what is stored in eax
  */
-static inline void syscall_do(uint32_t eax, uint32_t ebx, uint32_t ecx, uint32_t edx) {
-    __asm__ volatile("int $0x30" : : "a"(eax), "b"(ebx), "c"(ecx), "d"(edx) : "memory");
+static inline int32_t syscall_do(uint32_t eax, uint32_t ebx, uint32_t ecx, uint32_t edx) {
+    int32_t retval;
+    __asm__ volatile("int $0x30" : "=a" (retval) : "a"(eax), "b"(ebx), "c"(ecx), "d"(edx) : "memory");
 }
 
 // ==========================================
@@ -150,8 +151,7 @@ static inline void sys_shutdown(void) {
  */
 static inline int32_t sys_exec(struct EXT2ProgramRequest* req) {
     int32_t retval;
-    syscall_do(11, (uint32_t)req, 0, 0);
-    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
+    retval = syscall_do(11, (uint32_t)req, 0, 0);
     return retval;
 }
 
@@ -162,8 +162,7 @@ static inline int32_t sys_exec(struct EXT2ProgramRequest* req) {
  */
 static inline int32_t sys_kill(uint32_t pid) {
     int32_t retval;
-    syscall_do(12, pid, 0, 0);
-    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
+    retval = syscall_do(12, pid, 0, 0);
     return retval;
 }
 
@@ -205,8 +204,7 @@ static inline int32_t sys_ps(ProcessInfo *buffer, uint32_t bufsize) {
  */
 static inline int32_t sys_getcwd(char* buf, uint32_t bufsize) {
     int32_t retval;
-    syscall_do(22, (uint32_t)buf, bufsize, 0);
-    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
+    retval = syscall_do(22, (uint32_t)buf, bufsize, 0);
     return retval;
 }
 
@@ -217,8 +215,7 @@ static inline int32_t sys_getcwd(char* buf, uint32_t bufsize) {
  */
 static inline int32_t sys_chdir(const char* path) {
     int32_t retval;
-    syscall_do(23, (uint32_t)path, 0, 0);
-    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
+    retval = syscall_do(23, (uint32_t)path, 0, 0);
     return retval;
 }
 
@@ -240,8 +237,7 @@ static inline void sys_setcwd(uint32_t inode) {
  */
 static inline uint32_t sys_stat(const char* path, uint8_t* out_type) {
     uint32_t target_inode;
-    syscall_do(24, (uint32_t)path, (uint32_t)out_type, 0); 
-    __asm__ volatile("mov %%eax, %0": "=r"(target_inode));
+    target_inode = syscall_do(24, (uint32_t)path, (uint32_t)out_type, 0); 
     return target_inode;
 }
 
