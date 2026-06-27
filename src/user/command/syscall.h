@@ -198,7 +198,7 @@ static inline int32_t sys_ps(ProcessInfo *buffer, uint32_t bufsize) {
 
 /**
  * @brief Retrieves the absolute string path of the current working directory.
- * * @param buf Pointer to a user-allocated character array to store the path.
+ * @param buf Pointer to a user-allocated character array to store the path.
  * @param bufsize The maximum size of the buffer.
  * @return int32_t: The length of the path string on success, or -1 on failure (e.g., buffer too small).
  */
@@ -222,7 +222,7 @@ static inline int32_t sys_chdir(const char* path) {
 /**
  * @brief (Legacy) Changes the current working directory based on a raw inode.
  * @note This maps to the same syscall (23) as sys_chdir but passes an integer instead of a pointer.
- * * @param inode The target directory's Ext2 inode number.
+ * @param inode The target directory's Ext2 inode number.
  * @return None.
  */
 static inline void sys_setcwd(uint32_t inode) {
@@ -231,7 +231,7 @@ static inline void sys_setcwd(uint32_t inode) {
 
 /**
  * @brief Retrieves the inode number and file type for a given path.
- * * @param path Pointer to a null-terminated string representing the target file/folder.
+ * @param path Pointer to a null-terminated string representing the target file/folder.
  * @param out_type Pointer to a uint8_t where the file type (e.g., EXT2_FT_DIR) will be stored. Can be NULL.
  * @return uint32_t: The inode number if the target exists, or 0 if it does not exist.
  */
