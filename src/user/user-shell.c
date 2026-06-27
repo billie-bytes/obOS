@@ -12,9 +12,6 @@
 #define MAX_ARGS 16
 #define MAX_LINE 256
 
-uint32_t current_directory_inode = 2;
-char current_path[256] = "/";
-
 #define MAX_PATH_DIRS 8
 #define MAX_PATH_STR  64
 #define PATH_CONF_FILE "/path.conf"
@@ -34,9 +31,12 @@ static inline char read_key_blocking(void) {
 }
 
 static void print_prompt(void) {
+    char cwd[256];
+    sys_getcwd(cwd, sizeof(cwd));
+    
     sys_puts("root@obOS", 9, COLOR_PROMPT_USER);
     sys_puts(":", 1, COLOR_PROMPT_SEP);
-    sys_puts(current_path, strlen(current_path), COLOR_PROMPT_USER);
+    sys_puts(cwd, strlen(cwd), COLOR_PROMPT_USER);
     sys_puts("$ ", 2, COLOR_PROMPT_SEP);
 }
 
@@ -109,14 +109,14 @@ static int autocomplete(char* buf, int cur_len){
         if (buf[i] != ' ' && buf[i] != '\t') { is_first_word = false; break; }
     }
 
-    uint8_t dirbuf[4096 * 8]; // DIRBUF_BYTES equivalent
+    uint8_t dirbuf[4096 * 8]; 
     int matches = 0;
     char match_name[256] = {0};
     uint8_t match_types[HIST_MAX];
     char match_list[HIST_MAX][256];
 
     if (is_first_word) {
-        // Builtins + standard binaries for fast lookup without scanning $PATH yet
+        // Builtins + standard binaries
         const char* builtins[] = { "ls","cd","pwd","cat","mkdir","exec","ps","kill","clear","help", "export", "exit", "grep", "find" };
         int ncmd = (int)(sizeof(builtins)/sizeof(builtins[0]));
         for (int i=0;i<ncmd;i++) {
@@ -130,10 +130,14 @@ static int autocomplete(char* buf, int cur_len){
             }
         }
     } else {
+        // Query the kernel for our actual current directory inode
+        uint32_t cwd_inode = sys_stat(".", NULL);
+        if (cwd_inode == 0) return cur_len;
+
         struct EXT2DriverRequest req = {
             .buf = dirbuf,
             .buffer_size = sizeof(dirbuf),
-            .parent_inode = current_directory_inode,
+            .parent_inode = cwd_inode,
             .name = ".",
             .name_len = 1,
             .is_folder = true
@@ -182,37 +186,6 @@ static int autocomplete(char* buf, int cur_len){
     print_prompt();
     sys_puts(buf, cur_len, COLOR_INPUT);
     return cur_len;
-}
-
-// OS Syscall wrapper utilizing Syscall 24
-static uint32_t find_child(uint32_t dir_inode, const char* name, uint8_t* out_type) {
-    return sys_stat(dir_inode, name, out_type);
-}
-
-static bool resolve_path(const char* path, uint32_t* out_inode) {
-    if (!path || !*path) { *out_inode = current_directory_inode; return true; }
-    if (strcmp(path, "/") == 0) { *out_inode = 2; return true; }
-    uint32_t cur = (path[0] == '/') ? 2 : current_directory_inode;
-    char tmp[MAX_LINE];
-    strncpy(tmp, path, sizeof(tmp));
-    tmp[sizeof(tmp)-1] = 0;
-    char* s = tmp;
-    if (*s == '/') s++;
-    for (char* tok = strtok(s, "/"); tok; tok = strtok(NULL, "/")) {
-        if (strcmp(tok, ".") == 0) continue;
-        if (strcmp(tok, "..") == 0) {
-            uint32_t up = find_child(cur, "..", NULL);
-            if (!up) return false;
-            cur = up;
-            continue;
-        }
-        uint8_t t = 0;
-        uint32_t nxt = find_child(cur, tok, &t);
-        if (!nxt) return false;
-        cur = nxt;
-    }
-    *out_inode = cur;
-    return true;
 }
 
 static void split_path(const char* in, char* parent_out, char* base_out) {
@@ -270,11 +243,12 @@ static int path_remove(const char *dir) {
 static bool get_path_conf_parent(uint32_t *parent_inode_out, char *base_out) {
     char parent_path[MAX_LINE];
     split_path(PATH_CONF_FILE, parent_path, base_out);
-    if (strcmp(parent_path, "/") == 0) {
-        *parent_inode_out = 2;   
-        return true;
-    }
-    return resolve_path(parent_path, parent_inode_out);
+    
+    uint32_t inode = sys_stat(parent_path, NULL);
+    if (inode == 0) return false;
+    
+    *parent_inode_out = inode;
+    return true;
 }
 
 static void save_path_to_disk(void) {
@@ -361,51 +335,16 @@ static void path_print(void) {
     sys_putchar('\n', COLOR_TXT);
 }
 
-
 // ==== Built-in Commands ====
 
 static void cmd_cd(int argc, char* argv[]) {
-    if (argc < 2) { current_directory_inode = 2; strcpy(current_path, "/"); return; }
-    uint32_t target;
-    if (!resolve_path(argv[1], &target)) { sys_puts("cd: no such file or directory\n", 31, COLOR_TXT); return; }
+    if (argc < 2) { 
+        sys_chdir("/"); 
+        return; 
+    }
     
-    // Ensure it's a directory
-    uint8_t dummy[BLOCK_SIZE];
-    struct EXT2DriverRequest req = {
-        .buf          = dummy,
-        .name         = ".",
-        .name_len     = 1,
-        .parent_inode = target,
-        .buffer_size  = sizeof(dummy),
-        .is_folder    = true
-    };
-    if (sys_readdir(&req) != 0) { sys_puts("cd: not a directory\n", 21, COLOR_TXT); return; }
-    current_directory_inode = target;
-    
-    // Update path string
-    if (argv[1][0] == '/') {
-
-        // Handle edgecase of "//////folder" pathname
-        char* new_path;
-        {
-            uint32_t i = 0;
-            while(argv[1][i]=='/') ++i;
-            if(argv[1][i]=='\0') new_path = argv[1];
-            else new_path = &argv[1][i-1];
-        }
-        strncpy(current_path, new_path, 255);
-        current_path[255] = 0;
-    } else if (strcmp(argv[1], "..") == 0) {
-        size_t len = strlen(current_path);
-        if (len > 1) {
-            if (current_path[len-1] == '/') len--;
-            while (len > 1 && current_path[len-1] != '/') len--;
-            current_path[len-1] = 0;
-            if (len == 1) current_path[1] = 0;
-        }
-    } else if (strcmp(argv[1], ".") != 0) {
-        if (strcmp(current_path, "/") != 0) strcat(current_path, "/");
-        strcat(current_path, argv[1]);
+    if (sys_chdir(argv[1]) != 0) { 
+        sys_puts("cd: no such file or directory\n", 31, COLOR_TXT); 
     }
 }
 
@@ -440,38 +379,24 @@ static int spawn_program_at(const char *prog_path, uint32_t argc, char** argv) {
     char parent_path[MAX_LINE], base[MAX_LINE];
     split_path(prog_path, parent_path, base);
 
-    uint32_t parent_inode;
-
-    if (prog_path[0] == '/') {
-        if (strcmp(parent_path, "/") == 0)
-            parent_inode = 2;
-        else if (!resolve_path(parent_path, &parent_inode)) {
-            return -1;
-        }
-    } else {
-        if (strcmp(parent_path, ".") == 0)
-            parent_inode = current_directory_inode;
-        else if (!resolve_path(parent_path, &parent_inode)) {
-            return -1;
-        }
-    }
+    // Grab the parent inode easily via our new POSIX-style stat
+    uint32_t parent_inode = sys_stat(parent_path, NULL);
+    if (parent_inode == 0) return -1;
 
     uint8_t file_type = 0;
-    uint32_t target_inode = find_child(parent_inode, base, &file_type);
+    uint32_t target_inode = sys_stat(prog_path, &file_type);
     
-    // Prevent trying to execute a directory or non-existent file
+    // Prevent executing directories or non-existent files
     if (target_inode == 0 || file_type == EXT2_FT_DIR) {
         return -1; 
     }
 
-    uint32_t process_buffer = (2 * 1024 * 1024);
-    
     struct EXT2ProgramRequest req = {
         .buf          = (uint8_t*)0,
         .name         = base,
         .name_len     = (uint8_t)strlen(base),
         .parent_inode = parent_inode,
-        .buffer_size  = process_buffer,
+        .buffer_size  = (2 * 1024 * 1024),
         .argc         = argc,
         .argv         = argv
     };
@@ -479,15 +404,12 @@ static int spawn_program_at(const char *prog_path, uint32_t argc, char** argv) {
 }
 
 static int try_exec_with_path(int argc, char* argv[]) {
-
     const char *cmd = argv[0];
 
     // If command already contains '/', treat it as a direct path
     if (strchr(cmd, '/') != 0) {
         return spawn_program_at(cmd, argc, argv);
     }
-
-
     
     for (int i = 0; i < path_dir_count; i++) {
         char full[MAX_LINE];

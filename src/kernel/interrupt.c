@@ -14,6 +14,7 @@ struct TSSEntry _interrupt_tss_entry = {
     .ss0  = GDT_KERNEL_DATA_SEGMENT_SELECTOR,
 };
 uint32_t cwd_inode = 2;
+static char global_cwd_path[256] = "/";
 void syscall(struct InterruptFrame *frame);
 void io_wait(void) {
     out(0x80, 0);
@@ -82,6 +83,64 @@ extern uint64_t scheduler_get_ticks(void);
 static inline uint32_t ms_to_ticks(uint32_t ms) {
     uint32_t prod = ms * (uint32_t)PIT_TIMER_FREQUENCY;
     return (prod + 999u) / 1000u;
+}
+
+bool kernel_resolve_path(const char* target, uint32_t* out_inode, char* out_path) {
+    char path_copy[256];
+    strncpy(path_copy, target, 255);
+    path_copy[255] = '\0';
+
+    uint32_t current_inode = (path_copy[0] == '/') ? 2 : cwd_inode;
+    char new_path[256];
+    
+    if (path_copy[0] == '/') strcpy(new_path, "/");
+    else strcpy(new_path, global_cwd_path);
+
+    char* p = path_copy;
+    while (*p == '/') p++; // Skip leading slashes
+
+    while (*p) {
+        char* end = p;
+        while (*end && *end != '/') end++;
+        bool last = (*end == '\0');
+        *end = '\0';
+
+        if (strlen(p) > 0 && strcmp(p, ".") != 0) {
+            if (strcmp(p, "..") == 0) {
+                // Traverse Up
+                uint8_t type;
+                uint32_t up_inode = fs_stat(current_inode, "..", &type);
+                if (!up_inode) return false;
+                current_inode = up_inode;
+
+                // Strip last directory from string
+                size_t len = strlen(new_path);
+                if (len > 1) {
+                    if (new_path[len-1] == '/') len--;
+                    while (len > 1 && new_path[len-1] != '/') len--;
+                    new_path[len-1] = '\0';
+                    if (len == 1) new_path[1] = '\0';
+                }
+            } else {
+                // Traverse Down
+                uint8_t type;
+                uint32_t next_inode = fs_stat(current_inode, p, &type);
+                if (!next_inode) return false;
+                current_inode = next_inode;
+
+                if (strcmp(new_path, "/") != 0) strcat(new_path, "/");
+                strcat(new_path, p);
+            }
+        }
+        
+        if (last) break;
+        p = end + 1;
+        while (*p == '/') p++; // Skip multiple slashes
+    }
+
+    *out_inode = current_inode;
+    strcpy(out_path, new_path);
+    return true;
 }
 
 void syscall(struct InterruptFrame *frame) {
@@ -235,26 +294,66 @@ void syscall(struct InterruptFrame *frame) {
             out16(0x4004, 0x3400); 
             for (;;) { __asm__ volatile ("hlt"); }
             break;
+
+        // CHANGE THESE WHEN IMPLEMENTING MULTITASKING
         case 22:
-        /* Get current working directory */
-            frame->cpu.general.eax = cwd_inode; // Root inode
+        /* POSIX getcwd: char *getcwd(char *buf, size_t size); */
             if (frame->cpu.general.ebx && frame->cpu.general.ecx > 0) {
                 char *buf = (char*)frame->cpu.general.ebx;
-                buf[0] = '/';
-                buf[1] = '\0';
+                uint32_t size = frame->cpu.general.ecx;
+                uint32_t path_len = strlen(global_cwd_path);
+                
+                if (path_len + 1 > size) {
+                    frame->cpu.general.eax = -1; // ERANGE
+                } else {
+                    strcpy(buf, global_cwd_path);
+                    frame->cpu.general.eax = path_len; // Success
+                }
+            } else {
+                frame->cpu.general.eax = -1; // EINVAL
             }
             break;
+
         case 23:
-        /* Set current working directory */
-            frame->cpu.general.eax = 0;
+        /* POSIX chdir: int chdir(const char *path); */
+            {
+                const char* target_path = (char*)frame->cpu.general.ebx;
+                uint32_t new_inode;
+                char new_string_path[256];
+
+                if (kernel_resolve_path(target_path, &new_inode, new_string_path)) {
+                    uint8_t type = 0;
+                    // Confirm it is actually a directory
+                    if (fs_stat(new_inode, ".", &type) && type == EXT2_FT_DIR) {
+                        cwd_inode = new_inode;
+                        strcpy(global_cwd_path, new_string_path);
+                        frame->cpu.general.eax = 0; // Success
+                    } else {
+                        frame->cpu.general.eax = -1; // ENOTDIR
+                    }
+                } else {
+                    frame->cpu.general.eax = -1; // ENOENT
+                }
+            }
             break;
+
         case 24:
-        /* Check existence of file and get the inode */
-            frame->cpu.general.eax = fs_stat(
-                frame->cpu.general.ebx,
-                (char*)frame->cpu.general.ecx,
-                (uint8_t*)frame->cpu.general.edx
-            );
+        /* POSIX stat (Simplified): Get inode by full/relative path string */
+            {
+                const char* target_path = (char*)frame->cpu.general.ebx;
+                uint8_t* out_type = (uint8_t*)frame->cpu.general.ecx;
+                uint32_t target_inode;
+                char dummy_path[256];
+                
+                if (kernel_resolve_path(target_path, &target_inode, dummy_path)) {
+                    if (out_type) {
+                        fs_stat(target_inode, ".", out_type);
+                    }
+                    frame->cpu.general.eax = target_inode; // Returns the valid inode
+                } else {
+                    frame->cpu.general.eax = 0; // File not found
+                }
+            }
             break;
     }
 }

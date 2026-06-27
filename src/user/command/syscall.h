@@ -99,21 +99,28 @@ static inline void sys_shutdown(void) {
     syscall_do(21, 0, 0, 0);
 }
 
-static inline uint32_t sys_getcwd(char* buf, uint32_t bufsize) {
-    uint32_t retval;
+static inline int32_t sys_getcwd(char* buf, uint32_t bufsize) {
+    int32_t retval;
     syscall_do(22, (uint32_t)buf, bufsize, 0);
     __asm__ volatile("mov %%eax, %0" : "=r"(retval));
     return retval;
 }
 
-static inline void sys_setcwd(uint32_t inode, const char* path) {
-    syscall_do(23, inode, (uint32_t)path, 0);
+static inline int32_t sys_chdir(const char* path) {
+    int32_t retval;
+    syscall_do(23, (uint32_t)path, 0, 0);
+    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
+    return retval;
+}
+
+static inline void sys_setcwd(uint32_t inode) {
+    syscall_do(23, inode, 0, 0);
 }
 
 // Syscall 24: Check existence of file and get the inode
-static inline uint32_t sys_stat(uint32_t parent_inode, const char* name, uint8_t* out_type){
+static inline uint32_t sys_stat(const char* path, uint8_t* out_type) {
     uint32_t target_inode;
-    syscall_do(24, parent_inode, (uint32_t)name, (uint32_t)out_type); // Fixed typo here
+    syscall_do(24, (uint32_t)path, (uint32_t)out_type, 0); 
     __asm__ volatile("mov %%eax, %0": "=r"(target_inode));
     return target_inode;
 }
