@@ -1,25 +1,7 @@
 #include "user/command/syscall.h"
 #include "lib/string.h"
 
-#define MAX_LINE 256
 #define DIRBUF_BYTES (BLOCK_SIZE * 8)
-#define EXT2_FT_DIR 2
-
-static inline uint32_t sys_getcwd_inode(void) {
-    uint32_t retval;
-    char buf[256];
-    syscall_do(22, (uint32_t)buf, sizeof(buf), 0);
-    __asm__ volatile("mov %%eax, %0" : "=r"(retval));
-    return retval;
-}
-
-extern int strcmp(const char *s1, const char *s2);
-extern size_t strlen(const char *str);
-extern char* strcpy(char *dest, const char *src);
-extern char* strncpy(char *dest, const char *src, size_t n);
-extern char* strcat(char *dest, const char *src);
-extern char* strrchr(const char *s, int c);
-extern char* strtok(char *s, const char *delim);
 
 struct DirectoryTraversal {
     uint8_t* base;
@@ -48,59 +30,10 @@ static bool dirwalk_next(struct DirectoryTraversal* it, struct EXT2DirectoryEntr
     return true;
 }
 
-static uint32_t find_child(uint32_t dir_inode, const char* name) {
-    uint8_t dirbuf[DIRBUF_BYTES];
-    struct EXT2DriverRequest req = {.buf = dirbuf, .name = ".", .name_len = 1, .parent_inode = dir_inode, .buffer_size = sizeof(dirbuf), .is_folder = true};
-    int8_t rc = sys_readdir(&req);
-    if (rc != 0) return 0;
-    struct DirectoryTraversal it = { .base = dirbuf, .size = sizeof(dirbuf), .off = 0 };
-    struct EXT2DirectoryEntry e; char nm[256];
-    while (dirwalk_next(&it, &e, nm, sizeof(nm))) {
-        if (strcmp(nm, name) == 0) return e.inode;
-    }
-    return 0;
-}
-
-static bool resolve_path(const char* path, uint32_t* out_inode) {
-    if (!path || !*path) { *out_inode = sys_getcwd_inode(); return true; }
-    if (strcmp(path, "/") == 0) { *out_inode = 2; return true; }
-    uint32_t cur = (path[0] == '/') ? 2 : sys_getcwd_inode();
-    char tmp[MAX_LINE];
-    strncpy(tmp, path, sizeof(tmp));
-    tmp[sizeof(tmp)-1] = 0;
-    char* s = tmp;
-    if (*s == '/') s++;
-    for (char* tok = strtok(s, "/"); tok; tok = strtok(0, "/")) {
-        if (strcmp(tok, ".") == 0) continue;
-        if (strcmp(tok, "..") == 0) {
-            uint32_t up = find_child(cur, "..");
-            if (!up) return false;
-            cur = up;
-            continue;
-        }
-        uint32_t nxt = find_child(cur, tok);
-        if (!nxt) return false;
-        cur = nxt;
-    }
-    *out_inode = cur;
-    return true;
-}
-
 static void find_recursive(uint32_t current_inode, const char* current_path) {
     uint8_t dirbuf[4096]; 
-    int8_t rc = 0;
-
-    struct EXT2DriverRequest req = {
-        .buf          = dirbuf,
-        .name         = ".",
-        .name_len     = 1,
-        .parent_inode = current_inode,
-        .buffer_size  = sizeof(dirbuf),
-        .is_folder    = true
-    };
-
-    rc = sys_readdir(&req);
-    if (rc != 0) {
+    
+    if (sys_readdir(current_inode, dirbuf) < 0) {
         return;
     }
 
@@ -131,44 +64,24 @@ int main(int argc, char* argv[]) {
         return 1; 
     }
     
-    uint32_t parent_inode = 0;
-    if (argv[1][0] == '/') {
-        if (strcmp(argv[1], "/") == 0) parent_inode = 2;
-        else if (!resolve_path(argv[1], &parent_inode)) { 
-            sys_puts("find: '", 7, COLOR_TXT);
-            sys_puts(argv[1], strlen(argv[1]), COLOR_TXT);
-            sys_puts("': No such file or directory\n", 29, COLOR_TXT);
-            return 1; 
-        }
-    } else {
-        if (strcmp(argv[1], ".") == 0) parent_inode = sys_getcwd_inode();
-        else if (!resolve_path(argv[1], &parent_inode)) { 
-            sys_puts("find: '", 7, COLOR_TXT);
-            sys_puts(argv[1], strlen(argv[1]), COLOR_TXT);
-            sys_puts("': No such file or directory\n", 29, COLOR_TXT);
-            return 1; 
-        }
+    uint8_t type = 0;
+    
+    // Kernel handles all relative (.), absolute (/), and nested paths natively
+    uint32_t target_inode = sys_stat(argv[1], &type);
+    
+    if (target_inode == 0) {
+        sys_puts("find: '", 7, COLOR_TXT);
+        sys_puts(argv[1], strlen(argv[1]), COLOR_TXT);
+        sys_puts("': No such file or directory\n", 29, COLOR_TXT);
+        return 1; 
     }
 
-    uint8_t dirbuf[1024]; 
-    int8_t rc = 0;
-    struct EXT2DriverRequest req = {
-        .buf          = dirbuf,
-        .name         = ".",
-        .name_len     = 1,
-        .parent_inode = parent_inode,
-        .buffer_size  = sizeof(dirbuf),
-        .is_folder    = true
-    };
-    rc = sys_readdir(&req);
-
-    if (rc != 0) {
-        sys_puts(argv[1], (uint32_t)strlen(argv[1]), COLOR_TXT);
-        sys_putchar('\n', COLOR_TXT);
-    } else {
-        sys_puts(argv[1], (uint32_t)strlen(argv[1]), COLOR_TXT);
-        sys_putchar('\n', COLOR_TXT);
-        find_recursive(parent_inode, argv[1]);
+    // Print the root of the search
+    sys_puts(argv[1], (uint32_t)strlen(argv[1]), COLOR_TXT);
+    sys_putchar('\n', COLOR_TXT);
+    
+    if (type == EXT2_FT_DIR) {
+        find_recursive(target_inode, argv[1]);
     }
     
     return 0;
