@@ -130,19 +130,12 @@ static int autocomplete(char* buf, int cur_len){
             }
         }
     } else {
-        // Query the kernel for our actual current directory inode
+        // Direct kernel path resolution to grab the current directory inode
         uint32_t cwd_inode = sys_stat(".", NULL);
         if (cwd_inode == 0) return cur_len;
 
-        struct EXT2DriverRequest req = {
-            .buf = dirbuf,
-            .buffer_size = sizeof(dirbuf),
-            .parent_inode = cwd_inode,
-            .name = ".",
-            .name_len = 1,
-            .is_folder = true
-        };
-        if (sys_readdir(&req) != 0) return 0;
+        // Optimized read_directory syscall
+        if (sys_readdir(cwd_inode, dirbuf) < 0) return 0;
 
         struct DirectoryTraversal it = { .base = dirbuf, .size = sizeof(dirbuf), .off = 0 };
         struct EXT2DirectoryEntry e;
@@ -240,22 +233,13 @@ static int path_remove(const char *dir) {
     return 0;
 }
 
-static bool get_path_conf_parent(uint32_t *parent_inode_out, char *base_out) {
-    char parent_path[MAX_LINE];
-    split_path(PATH_CONF_FILE, parent_path, base_out);
-    
-    uint32_t inode = sys_stat(parent_path, NULL);
-    if (inode == 0) return false;
-    
-    *parent_inode_out = inode;
-    return true;
-}
-
 static void save_path_to_disk(void) {
-    uint32_t parent_inode;
-    char base[MAX_LINE];
-
-    if (!get_path_conf_parent(&parent_inode, base)) return;
+    // Requires the path.conf file to exist before it can write bytes to the inode
+    uint32_t target_inode = sys_stat(PATH_CONF_FILE, NULL);
+    if (target_inode == 0) {
+        sys_puts("export: cannot save. /path.conf missing.\n", 41, COLOR_TXT);
+        return;
+    }
 
     uint8_t buf[512];
     uint32_t pos = 0;
@@ -275,52 +259,38 @@ static void save_path_to_disk(void) {
         pos++;
     }
 
-    struct EXT2DriverRequest req = {
-        .buf          = buf,
-        .name         = base,
-        .name_len     = (uint8_t)strlen(base),
-        .parent_inode = parent_inode,
-        .buffer_size  = pos,
-        .is_folder    = false
-    };
-    sys_write(&req);
+    sys_write(target_inode, buf, pos);
 }
 
 static void load_path_from_disk(void) {
     path_clear();
-    uint32_t parent_inode;
-    char base[MAX_LINE];
+    
+    uint8_t type = 0;
+    uint32_t target_inode = sys_stat(PATH_CONF_FILE, &type);
 
-    if (!get_path_conf_parent(&parent_inode, base)) {
+    if (target_inode == 0 || type == EXT2_FT_DIR) {
         path_add("/");
         return;
     }
 
     uint8_t buf[512];
-    struct EXT2DriverRequest req = {
-        .buf          = buf,
-        .name         = base,
-        .name_len     = (uint8_t)strlen(base),
-        .parent_inode = parent_inode,
-        .buffer_size  = sizeof(buf),
-        .is_folder    = false
-    };
+    int32_t bytes_read = sys_read(target_inode, buf, sizeof(buf));
     
-    if (sys_read(&req) != 0) {
+    if (bytes_read <= 0) {
         path_add("/");
         return;
     }
 
     uint32_t i = 0;
-    while (i < sizeof(buf) && buf[i] != 0) {
+    while (i < bytes_read && buf[i] != 0) {
         char tmp[MAX_PATH_STR];
         uint32_t j = 0;
-        while (i < sizeof(buf) && buf[i] != '\n' && buf[i] != 0 && j < MAX_PATH_STR - 1) {
+        while (i < bytes_read && buf[i] != '\n' && buf[i] != 0 && j < MAX_PATH_STR - 1) {
             tmp[j++] = (char)buf[i++];
         }
         tmp[j] = 0;
         if (j > 0) path_add(tmp);
-        if (i < sizeof(buf) && buf[i] == '\n') i++;
+        if (i < bytes_read && buf[i] == '\n') i++;
     }
 
     if (path_dir_count == 0) path_add("/");
@@ -379,7 +349,6 @@ static int spawn_program_at(const char *prog_path, uint32_t argc, char** argv) {
     char parent_path[MAX_LINE], base[MAX_LINE];
     split_path(prog_path, parent_path, base);
 
-    // Grab the parent inode easily via our new POSIX-style stat
     uint32_t parent_inode = sys_stat(parent_path, NULL);
     if (parent_inode == 0) return -1;
 

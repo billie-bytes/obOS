@@ -360,6 +360,35 @@ int8_t write(struct EXT2DriverRequest request);
  */
 int8_t delete(struct EXT2DriverRequest request);
 
+/**
+ * @brief Reads data directly from a known inode.
+ * Decouples data I/O from directory traversal.
+ * @param inode_num The target inode number to read from.
+ * @param buf The buffer to store the read data.
+ * @param buffer_size The maximum amount of bytes to read.
+ * @return 0 on success, or specific error code.
+ */
+int32_t ext2_read_inode_data(uint32_t inode_num, void* buf, uint32_t buffer_size);
+
+/**
+ * @brief Writes data directly to an EXISTING inode.
+ * Note: This does NOT create a directory entry. The inode must already be linked to a directory.
+ * @param inode_num The target inode number to overwrite.
+ * @param buf The buffer containing data to write.
+ * @param buffer_size The size of the data to write.
+ * @return 0 on success, or specific error code.
+ */
+int32_t ext2_write_inode_data(uint32_t inode_num, void* buf, uint32_t buffer_size);
+
+/**
+ * @brief Deletes a file directly using the parent inode and the exact string name.
+ * Bypasses the need for the EXT2DriverRequest struct.
+ * @param parent_inode The inode of the directory containing the file.
+ * @param name The exact string name of the file to delete.
+ * @return 0 on success, or specific error code.
+ */
+int8_t ext2_delete_file(uint32_t parent_inode, const char* name);
+
 /* =============================== MEMORY ==========================================*/
 
 /**

@@ -84,8 +84,24 @@ static inline uint32_t ms_to_ticks(uint32_t ms) {
     uint32_t prod = ms * (uint32_t)PIT_TIMER_FREQUENCY;
     return (prod + 999u) / 1000u;
 }
-
-// Add 'uint8_t* out_type' to the signature
+/**
+ * @brief Resolves a full or relative string path into its target Ext2 inode.
+ * Checks if the path is absolute (starts with '/') or relative. If absolute, it 
+ * starts traversing from the Root Inode (2). If relative, it starts from the 
+ * Current Working Directory (`cwd_inode`).
+ * Tokenizes the string path by slashes ('/').
+ * For each token (folder name):
+ * - If it's ".", it skips it.
+ * - If it's "..", it looks up the parent inode.
+ * - Otherwise, it queries the filesystem (`fs_stat`) to find the child's inode.
+ * It maintains an updated "absolute path string" (`out_path`) so functions like 
+ * `sys_getcwd` can easily report where the user is.
+ * @param target The string path provided by user space.
+ * @param out_inode Pointer to store the final resolved inode number.
+ * @param out_path Pointer to store the normalized absolute path string.
+ * @param out_type Pointer to store the final file type (e.g., EXT2_FT_DIR or EXT2_FT_REG_FILE).
+ * @return bool: true if the path exists and was resolved, false otherwise.
+ */
 bool kernel_resolve_path(const char* target, uint32_t* out_inode, char* out_path, uint8_t* out_type) {
     char path_copy[256];
     strncpy(path_copy, target, 255);
@@ -142,6 +158,79 @@ bool kernel_resolve_path(const char* target, uint32_t* out_inode, char* out_path
     return true;
 }
 
+
+/**
+ * @brief Splits a file path into its Parent Directory Inode and the isolated Filename.
+ * Scans the path backwards to find the final slash ('/').
+ * If there is no slash (e.g., "test.txt"), the file is in the current directory. 
+ * It returns `cwd_inode` and copies the whole string as the filename.
+ * If there is a slash (e.g., "/usr/bin/gcc"), it splits the string at the final slash.
+ * - The left side ("/usr/bin") is passed to `kernel_resolve_path` to get the parent inode.
+ * - The right side ("gcc") is isolated as the exact filename.
+ *Verifies that the resolved parent is actually a directory.
+ * @param target_path The full or relative path provided by the user (e.g., "docs/file.txt").
+ * @param out_parent_inode Pointer to store the resolved inode of the parent folder.
+ * @param out_filename Pointer to an allocated buffer (at least 256 bytes) to store the isolated file name.
+ * @return bool: true if the parent path exists and is a directory, false otherwise.
+ */
+bool kernel_resolve_parent_and_name(const char* target_path, uint32_t* out_parent_inode, char* out_filename) {
+    if (!target_path || strlen(target_path) == 0) return false;
+
+    char path_copy[256];
+    strncpy(path_copy, target_path, 255);
+    path_copy[255] = '\0';
+
+    // Find the last slash in the path
+    char* last_slash = NULL;
+    char* p = path_copy;
+    while (*p) {
+        if (*p == '/') last_slash = p;
+        p++;
+    }
+
+    // CASE 1: No slash found (e.g., "file.txt")
+    // Parent is the current working directory.
+    if (last_slash == NULL) {
+        *out_parent_inode = cwd_inode;
+        strncpy(out_filename, path_copy, 255);
+        out_filename[255] = '\0';
+        return true;
+    }
+
+    // CASE 2: Slash found. We need to split the string.
+    char parent_path_to_resolve[256];
+
+    if (last_slash == path_copy) {
+        // Edge case: File is in the root directory (e.g., "/file.txt")
+        strcpy(parent_path_to_resolve, "/");
+        strncpy(out_filename, last_slash + 1, 255);
+    } else {
+        // Standard case: File is in a nested directory (e.g., "dir/file.txt" or "/dir/file.txt")
+        *last_slash = '\0'; // Cut the string here
+        strcpy(parent_path_to_resolve, path_copy); // Everything before the slash
+        strncpy(out_filename, last_slash + 1, 255); // Everything after the slash
+    }
+    out_filename[255] = '\0';
+
+    // Prevent edge case where path ends in a slash (e.g., "dir/")
+    if (strlen(out_filename) == 0) {
+        return false; 
+    }
+
+    // Resolve the isolated parent path
+    char dummy_path[256];
+    uint8_t parent_type;
+    
+    if (kernel_resolve_path(parent_path_to_resolve, out_parent_inode, dummy_path, &parent_type)) {
+        // Ensure the parent is actually a directory
+        if (parent_type == EXT2_FT_DIR) {
+            return true;
+        }
+    }
+    
+    return false; // Parent path didn't exist or wasn't a directory
+}
+
 void syscall(struct InterruptFrame *frame) {
     switch (frame->cpu.general.eax) {
         case 0:
@@ -169,11 +258,17 @@ void syscall(struct InterruptFrame *frame) {
             }
             break;
         case 3:
-        /* delete() */
-            if (frame->cpu.general.ecx) {
-                *((int8_t*) frame->cpu.general.ecx) = delete(
-                    *(struct EXT2DriverRequest*) frame->cpu.general.ebx
-                );
+        /* delete() - ebx = path string */
+            {
+                const char* target_path = (char*)frame->cpu.general.ebx;
+                uint32_t parent_inode;
+                char filename[256];
+                
+                if (kernel_resolve_parent_and_name(target_path, &parent_inode, filename)) {
+                    frame->cpu.general.eax = ext2_delete_file(parent_inode, filename);
+                } else {
+                    frame->cpu.general.eax = -1; // ENOENT
+                }
             }
             break;
         case 4:
@@ -354,6 +449,34 @@ void syscall(struct InterruptFrame *frame) {
                     frame->cpu.general.eax = target_inode; // Returns the valid inode
                 } else {
                     frame->cpu.general.eax = 0; // File not found
+                }
+            }
+            break;
+
+        case 25:
+        /* mkdir() - ebx = path string */
+            {
+                const char* target_path = (char*)frame->cpu.general.ebx;
+                uint32_t parent_inode;
+                char dirname[256];
+                
+                if (kernel_resolve_parent_and_name(target_path, &parent_inode, dirname)) {
+                    
+                    // legacy struct in Ring 0 so User Space doesn't have to
+                    struct EXT2DriverRequest req = {
+                        .buf = 0,
+                        .name = dirname,
+                        .name_len = (uint8_t)strlen(dirname),
+                        .parent_inode = parent_inode,
+                        .buffer_size = 0,
+                        .is_folder = true
+                    };
+                    
+                    int8_t rc = write(req);
+                    frame->cpu.general.eax = (int32_t)rc; // 0 on success, >0 on fs error
+                    
+                } else {
+                    frame->cpu.general.eax = -1; // Parent directory not found or invalid path
                 }
             }
             break;

@@ -1637,3 +1637,125 @@ uint32_t fs_stat(uint32_t parent_inode_num, char* name, uint8_t* out_type) {
     
     return entry.inode;
 }
+
+
+/**
+ * @brief Reads data directly from an Inode (Standard POSIX style).
+ * Directly fetches the inode from the inode table. It validates it is a regular 
+ * file, verifies bounds against the buffer size, and seamlessly traverses direct, 
+ * single, double, and triple indirect blocks (via read_inode_blocks) to fill the buffer.
+ */
+int32_t ext2_read_inode_data(uint32_t inode_num, void* buf, uint32_t buffer_size) {
+    struct EXT2Inode inode;
+    if(read_inode(inode_num, &inode) != 1) {
+        return -1; // Inode read error
+    }
+    if(!(inode.i_mode & EXT2_S_IFREG)) { 
+        return 1; // Not a regular file
+    }
+    if(inode.i_size > buffer_size) { 
+        return 2; // Buffer too small
+    }    
+
+    struct BlockBuffer temp_block;
+    uint32_t remaining_bytes = inode.i_size;
+    uint8_t *write_ptr = (uint8_t *)buf;
+    uint32_t total_blocks = (inode.i_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+    for (uint32_t i = 0; i < total_blocks; i++) {
+        uint32_t phys_block = read_inode_blocks(inode, i);
+        
+        if (phys_block == 0) {
+            memset(&temp_block, 0, BLOCK_SIZE); // Sparse hole
+        } else {
+            read_blocks(&temp_block, phys_block, 1);
+        }
+
+        uint32_t bytes_to_copy = (remaining_bytes > BLOCK_SIZE) ? BLOCK_SIZE : remaining_bytes;
+        memcpy(write_ptr, temp_block.buf, bytes_to_copy);
+        
+        write_ptr += bytes_to_copy;
+        remaining_bytes -= bytes_to_copy;
+    }
+
+    return inode.i_size;
+}
+
+/**
+ * @brief Overwrites data to an existing Inode.
+ * Takes an existing inode. Calculates how many old blocks it has and frees them. 
+ * Re-allocates fresh blocks using `allocate_node_blocks` function to accommodate 
+ * the new buffer size, updates the inode size, and writes it back to disk.
+ */
+int32_t ext2_write_inode_data(uint32_t inode_num, void* buf, uint32_t buffer_size) {
+    struct EXT2Inode inode;
+    if(read_inode(inode_num, &inode) != 1) {
+        return -1; // Inode read error
+    }
+    if(!(inode.i_mode & EXT2_S_IFREG)) { 
+        return 1; // Cannot overwrite directories this way
+    }
+
+    uint32_t bgd_idx = inode_to_bgd(inode_num);
+
+    // === Deallocate old blocks ===
+    
+    // new metadata
+    inode.i_size = buffer_size;
+    inode.i_blocks = (buffer_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    memset(inode.i_block, 0, sizeof(inode.i_block)); 
+
+    // new data
+    allocate_node_blocks(buf, &inode, bgd_idx);
+    write_node_disk(inode, inode_num);
+
+    return buffer_size;
+}
+
+/**
+ * @brief Deletes a file using absolute arguments.
+ */
+int8_t ext2_delete_file(uint32_t parent_inode_num, const char* name) {
+    struct EXT2Inode parent_inode;
+    if(read_inode(parent_inode_num, &parent_inode) != 1) return -1;
+    if(!(parent_inode.i_mode & EXT2_S_IFDIR)) return 3;
+
+    char request_name[256];
+    strncpy(request_name, name, 255);
+    request_name[255] = '\0';
+
+    struct EXT2DirectoryEntry entry;
+    // Try generic search for file or dir
+    uint32_t entry_block_addr = get_directory_entry(parent_inode, request_name, EXT2_FT_REG_FILE, &entry);
+    if(entry_block_addr == BLOCKS_COUNT + 1) {
+        entry_block_addr = get_directory_entry(parent_inode, request_name, EXT2_FT_DIR, &entry);
+    }
+    if(entry_block_addr == 0 || entry_block_addr == BLOCKS_COUNT + 1) return -1; // Not found
+    
+    struct EXT2Inode node;
+    read_inode(entry.inode, &node);
+    
+    if(entry.file_type == EXT2_FT_DIR) { 
+        struct BlockBuffer entry_block;
+        if(node.i_block[0] == 0) return -1;
+        read_blocks(&entry_block, node.i_block[0], 1);
+
+        if(node.i_size > BLOCK_SIZE) return 2; // Folder not empty
+        
+        uint16_t dotdot_rec_len = (*(uint16_t*)&entry_block.buf[12+4]);
+        if(dotdot_rec_len + 12 != BLOCK_SIZE) return 2; // Folder not empty
+
+        read_redundant_gdt(); 
+        struct EXT2BlockGroupDescriptor *bgd = &b_group_descriptor_table.table[inode_to_bgd(entry.inode)];
+        bgd->bg_used_dirs_count--;
+
+        for(uint32_t i = 0; i < GROUPS_COUNT; i++) {
+             write_blocks(&b_group_descriptor_table, (i * BLOCKS_PER_GROUP) + GDT_OFFSET, GDT_SIZE_BLOCKS);
+        }
+    }
+
+    remove_entry_from_dir(parent_inode_num, request_name);
+    deallocate_node(entry.inode);
+    
+    return 0;
+}

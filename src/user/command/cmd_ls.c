@@ -36,8 +36,6 @@ static bool dirwalk_next(struct DirectoryTraversal* it, struct EXT2DirectoryEntr
     return true;
 }
 
-
-
 int main(int argc, char* argv[]) {
     const char* path = (argc > 1) ? argv[1] : ".";
     
@@ -46,7 +44,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // The kernel's sys_stat handles relative and absolute paths via kernel_resolve_path
     uint8_t type = 0;
     uint32_t target_inode = sys_stat(path, &type);
     
@@ -61,17 +58,9 @@ int main(int argc, char* argv[]) {
     }
 
     uint8_t dirbuf[DIRBUF_BYTES];
-    struct EXT2DriverRequest req = {
-        .buf = dirbuf,
-        .name = ".",
-        .name_len = 1,
-        .parent_inode = target_inode,
-        .buffer_size = sizeof(dirbuf),
-        .is_folder = true
-    };
+    int32_t rc = sys_readdir(target_inode, dirbuf);
     
-    int8_t rc = sys_readdir(&req);
-    if (rc != 0) {
+    if (rc < 0) {
         sys_puts("ls: error reading directory\n", 28, COLOR_TXT);
         return 1;
     }
@@ -79,6 +68,7 @@ int main(int argc, char* argv[]) {
     struct DirectoryTraversal it = { .base = dirbuf, .size = sizeof(dirbuf), .off = 0 };
     struct EXT2DirectoryEntry e;
     char nm[256];
+    
     while (dirwalk_next(&it, &e, nm, sizeof(nm))) {
         if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0) continue;
         

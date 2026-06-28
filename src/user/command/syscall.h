@@ -66,36 +66,29 @@ static inline void sys_keyboard_activate(void) {
 // ==========================================
 
 /**
- * @brief Reads the contents of a file from the Ext2 filesystem.
- * * @param r Pointer to a configured EXT2DriverRequest struct.
- * @return int8_t: 0 on success, or a specific error code on failure.
+ * @brief Reads data directly from an inode.
+ * @param inode The target Ext2 inode number.
+ * @param buf Pointer to the destination buffer.
+ * @param size Number of bytes to read.
+ * @return int32_t: Bytes read, or an error code.
  */
-static inline int8_t sys_read(struct EXT2DriverRequest* r) {
-    int8_t rc;
-    syscall_do(0, (uint32_t)r, (uint32_t)&rc, 0);
-    return rc;
+static inline int32_t sys_read(uint32_t inode, void* buf, uint32_t size) {
+    // eax=0, ebx=inode, ecx=buf, edx=size. Return value is caught natively by eax.
+    return syscall_do(0, inode, (uint32_t)buf, size);
 }
 
 /**
- * @brief Reads the contents of a directory from the Ext2 filesystem.
- * * @param r Pointer to a configured EXT2DriverRequest struct.
- * @return int8_t: 0 on success, or a specific error code on failure.
+ * @brief Reads directory table blocks from an inode.
  */
-static inline int8_t sys_readdir(struct EXT2DriverRequest* r) {
-    int8_t rc;
-    syscall_do(1, (uint32_t)r, (uint32_t)&rc, 0);
-    return rc;
+static inline int32_t sys_readdir(uint32_t inode, void* buf) {
+    return syscall_do(1, inode, (uint32_t)buf, 0);
 }
 
 /**
- * @brief Writes data to a file or creates a new file/directory.
- * * @param r Pointer to a configured EXT2DriverRequest struct.
- * @return int8_t: 0 on success, or a specific error code on failure.
+ * @brief Writes data directly to an inode.
  */
-static inline int8_t sys_write(struct EXT2DriverRequest* r) {
-    int8_t rc;
-    syscall_do(2, (uint32_t)r, (uint32_t)&rc, 0);
-    return rc;
+static inline int32_t sys_write(uint32_t inode, void* buf, uint32_t size) {
+    return syscall_do(2, inode, (uint32_t)buf, size);
 }
 
 /**
@@ -103,10 +96,15 @@ static inline int8_t sys_write(struct EXT2DriverRequest* r) {
  * * @param r Pointer to a configured EXT2DriverRequest struct.
  * @return int8_t: 0 on success, or a specific error code on failure.
  */
-static inline int8_t sys_delete(struct EXT2DriverRequest* r) {
-    int8_t rc;
-    syscall_do(3, (uint32_t)r, (uint32_t)&rc, 0);
-    return rc;
+static inline int32_t sys_delete(const char* path) {
+    return syscall_do(3, (uint32_t)path, 0, 0);
+}
+
+/**
+ * @brief Creates a new directory at the specified path.
+ */
+static inline int32_t sys_mkdir(const char* path) {
+    return syscall_do(25, (uint32_t)path, 0, 0);
 }
 
 // ==========================================
