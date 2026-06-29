@@ -338,6 +338,8 @@ bool is_directory_empty(uint32_t inode);
  */
 int8_t read_directory(struct EXT2DriverRequest *prequest);
 
+int8_t ext2_read_directory(uint32_t inode_num, void* buf, uint32_t buffer_size);
+
 /**
  * @brief EXT2 read, read a file from file system
  * @param request All attribute will be used except is_dir for read, buffer_size will limit reading count

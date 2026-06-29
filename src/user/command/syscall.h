@@ -80,8 +80,8 @@ static inline int32_t sys_read(uint32_t inode, void* buf, uint32_t size) {
 /**
  * @brief Reads directory table blocks from an inode.
  */
-static inline int32_t sys_readdir(uint32_t inode, void* buf) {
-    return syscall_do(1, inode, (uint32_t)buf, 0);
+static inline int32_t sys_readdir(uint32_t inode, void* buf, uint32_t bufsize) {
+    return syscall_do(1, inode, (uint32_t)buf, bufsize);
 }
 
 /**

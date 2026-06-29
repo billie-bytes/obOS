@@ -10,15 +10,17 @@ struct DirectoryTraversal {
     uint32_t off;
 };
 
-static bool dirwalk_next(struct DirectoryTraversal* it, struct EXT2DirectoryEntry* out_entry, char* name_buf, uint16_t name_buf_sz) {
-    if (it->off >= it->size) return false;
+volatile static bool dirwalk_next(struct DirectoryTraversal* it, struct EXT2DirectoryEntry* out_entry, char* name_buf, uint16_t name_buf_sz) {
+    if (it->off >= it->size) {
+        sys_puts("Invalid offset\n",15,COLOR_TXT);
+        return false;
+    }
     
     uint8_t* p = it->base + it->off;
     uint32_t inode = *(uint32_t*)(p + 0);
     uint16_t rec = *(uint16_t*)(p + 4);
     uint16_t nlen = *(uint16_t*)(p + 6);
     uint8_t ftype = *(uint8_t*)(p + 8);
-    
     if (rec == 0 || inode == 0) return false;
     if (it->off + rec > it->size) return false;
     
@@ -58,7 +60,7 @@ int main(int argc, char* argv[]) {
     }
 
     uint8_t dirbuf[DIRBUF_BYTES];
-    int32_t rc = sys_readdir(target_inode, dirbuf);
+    int32_t rc = sys_readdir(target_inode, dirbuf,DIRBUF_BYTES);
     
     if (rc < 0) {
         sys_puts("ls: error reading directory\n", 28, COLOR_TXT);
@@ -68,7 +70,6 @@ int main(int argc, char* argv[]) {
     struct DirectoryTraversal it = { .base = dirbuf, .size = sizeof(dirbuf), .off = 0 };
     struct EXT2DirectoryEntry e;
     char nm[256];
-    
     while (dirwalk_next(&it, &e, nm, sizeof(nm))) {
         if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0) continue;
         
@@ -76,6 +77,5 @@ int main(int argc, char* argv[]) {
         sys_puts(nm, strlen(nm), color);
         sys_putchar('\n', COLOR_TXT);
     }
-    
     return 0;
 }

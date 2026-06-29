@@ -1614,6 +1614,43 @@ int8_t read_directory(struct EXT2DriverRequest *prequest){
     return 0; //success
 }
 
+int8_t ext2_read_directory(uint32_t inode_num, void* buf, uint32_t buffer_size){
+    struct EXT2Inode inode;
+    
+    if(read_inode(inode_num,&inode)!=1){//unknown error when reading the file inode
+        return -1;
+    }
+    if(!(inode.i_mode & EXT2_S_IFDIR)){ //not a folder (according to the inode)
+        return 1;
+    }
+    // Inode blocks traversal
+    struct BlockBuffer temp_block;
+    uint32_t remaining_bytes = inode.i_size;
+    if(remaining_bytes>buffer_size) return -1;
+    uint8_t *write_ptr = (uint8_t *)buf;
+
+    uint32_t total_blocks = (inode.i_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    
+    for (uint32_t i = 0; i < total_blocks; i++) {
+        uint32_t phys_block = read_inode_blocks(inode, i);
+        
+        if (phys_block == 0) {
+            memset(&temp_block, 0, BLOCK_SIZE);
+        } else {
+            read_blocks(&temp_block, phys_block, 1);
+        }
+
+        uint32_t bytes_to_copy = (remaining_bytes > BLOCK_SIZE) ? BLOCK_SIZE : remaining_bytes;
+        
+        memcpy(write_ptr, temp_block.buf, bytes_to_copy);
+        
+        write_ptr += bytes_to_copy;
+        remaining_bytes -= bytes_to_copy;
+    }
+
+    return 0; //success
+}
+
 
 uint32_t fs_stat(uint32_t parent_inode_num, char* name, uint8_t* out_type) {
     struct EXT2Inode parent_node;

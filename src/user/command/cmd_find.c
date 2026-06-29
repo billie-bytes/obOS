@@ -33,7 +33,7 @@ static bool dirwalk_next(struct DirectoryTraversal* it, struct EXT2DirectoryEntr
 static void find_recursive(uint32_t current_inode, const char* current_path) {
     uint8_t dirbuf[4096]; 
     
-    if (sys_readdir(current_inode, dirbuf) < 0) {
+    if (sys_readdir(current_inode, dirbuf,4096) < 0) {
         return;
     }
 

@@ -135,7 +135,7 @@ static int autocomplete(char* buf, int cur_len){
         if (cwd_inode == 0) return cur_len;
 
         // Optimized read_directory syscall
-        if (sys_readdir(cwd_inode, dirbuf) < 0) return 0;
+        if (sys_readdir(cwd_inode, dirbuf, 4096 * 8) < 0) return 0;
 
         struct DirectoryTraversal it = { .base = dirbuf, .size = sizeof(dirbuf), .off = 0 };
         struct EXT2DirectoryEntry e;

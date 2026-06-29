@@ -235,26 +235,36 @@ void syscall(struct InterruptFrame *frame) {
     switch (frame->cpu.general.eax) {
         case 0:
         /* read() */
-            if (frame->cpu.general.ecx) {
-                *((int8_t*) frame->cpu.general.ecx) = read(
-                    *(struct EXT2DriverRequest*) frame->cpu.general.ebx
-                );
+            {
+                struct EXT2DriverRequest req = {
+                    .parent_inode = frame->cpu.general.ebx,
+                    .buf = (void*)frame->cpu.general.ecx,
+                    .buffer_size = frame->cpu.general.edx
+                };
+                // Original code passed the struct by value, keeping that behavior
+                frame->cpu.general.eax = read(req); 
             }
             break;
         case 1:
         /* read_directory() */
-            if (frame->cpu.general.ecx) {
-                *((int8_t*) frame->cpu.general.ecx) = read_directory(
-                    (struct EXT2DriverRequest*) frame->cpu.general.ebx
-                );
+            {
+                uint32_t inode_num = (uint32_t)frame->cpu.general.ebx;
+                void* buf = (void*)frame->cpu.general.ecx;
+                uint32_t bufsize = (uint32_t)frame->cpu.general.edx;
+
+                frame->cpu.general.eax = ext2_read_directory(inode_num, buf, bufsize);
             }
             break;
         case 2:
         /* write() */
-            if (frame->cpu.general.ecx) {
-                *((int8_t*) frame->cpu.general.ecx) = write(
-                    *(struct EXT2DriverRequest*) frame->cpu.general.ebx
-                );
+            {
+                struct EXT2DriverRequest req = {
+                    .parent_inode = frame->cpu.general.ebx,
+                    .buf = (void*)frame->cpu.general.ecx,
+                    .buffer_size = frame->cpu.general.edx
+                };
+                // Original code passed the struct by value, keeping that behavior
+                frame->cpu.general.eax = write(req);
             }
             break;
         case 3:
