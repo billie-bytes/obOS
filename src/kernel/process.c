@@ -235,8 +235,7 @@ int32_t process_create_user_process(struct EXT2ProgramRequest request) {
     process_manager_state.active_process_count++;
 
 
-
-    
+    retcode = new_pcb->metadata.pid;
 exit_cleanup:
     return retcode;
 }

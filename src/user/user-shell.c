@@ -369,7 +369,27 @@ static int spawn_program_at(const char *prog_path, uint32_t argc, char** argv) {
         .argc         = argc,
         .argv         = argv
     };
-    return sys_exec(&req);
+    int32_t pid = sys_exec(&req);
+    if (pid >= 0) {
+        ProcessInfo p_info[16];
+        bool is_running = true;
+        
+        while (is_running) {
+            is_running = false;
+            int active_count = sys_ps(p_info, 16);
+            
+            for (int i = 0; i < active_count; i++) {
+                if (p_info[i].pid == (uint32_t)pid && p_info[i].state != PROCESS_TERMINATED) {
+                    is_running = true;
+                    // Sleep for 10ms to prevent the shell from hogging the CPU (Syscall 9)
+                    syscall_do(9, 10, 0, 0); 
+                    break;
+                }
+            }
+        }
+    }
+    
+    return pid;
 }
 
 static int try_exec_with_path(int argc, char* argv[]) {
