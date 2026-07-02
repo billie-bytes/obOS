@@ -15,7 +15,26 @@ void print_two_digits(uint8_t row, uint8_t col, uint8_t value) {
     sys_putchar_at(row, col + 1, '0' + ones, COLOR_CLOCK);
 }
 
-int main(void) {
+int main(int argc, char* argv[]) {
+    if(argc<2){
+        uint8_t filetype;
+        char name[] = "clock";
+        char* argv[] = {"clock", "&"};
+        uint8_t type;
+        
+        struct EXT2ProgramRequest req = {
+            .buf = (uint8_t*)0,
+            .name = name,
+            .name_len = 5,
+            .flags = 0,
+            .parent_inode = 2,
+            .buffer_size = (2 * 1024 * 1024),
+            .argc = 2,
+            .argv = argv,
+        };
+        sys_exec(&req);
+        return 0;
+    }
     struct cmos_reader time;
     uint8_t row = 24;
     uint8_t col = 71;

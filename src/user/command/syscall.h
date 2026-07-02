@@ -201,14 +201,15 @@ typedef enum {
     PROCESS_TERMINATED = 0,
     PROCESS_RUNNING = 1,
     PROCESS_READY = 2,
+    PROCESS_SLEEPING = 3,
 } PROCESS_STATE;
 
 typedef struct {
     uint32_t pid;
-    PROCESS_STATE state;
+    uint8_t state;
     char name[32];
     uint8_t name_len;
-} ProcessInfo;
+} __attribute__((packed)) ProcessInfo;
 
 /**
  * @brief Retrieves a list of currently active processes.

@@ -263,7 +263,7 @@ int32_t get_process_info(ProcessInfo *buffer, uint32_t bufsize){
         }
         
         buffer[count].pid = _process_list[i].metadata.pid;
-        buffer[count].state = _process_list[i].metadata.state;
+        buffer[count].state = (uint8_t)_process_list[i].metadata.state;
         
         // Copy name string to avoid kernel-user space pointer issue
         uint8_t len = _process_list[i].metadata.name_len;

@@ -71,6 +71,7 @@ typedef enum PROCESS_STATE : uint8_t {
     PROCESS_SLEEPING,
 } PROCESS_STATE;
 
+
 /**
  * Structure data containing information about a process
  *
@@ -138,13 +139,12 @@ int32_t process_create_user_process(struct EXT2ProgramRequest request);
  */
 bool process_destroy(uint32_t pid);
 
-typedef struct
-{
+typedef struct {
     uint32_t pid;
-    PROCESS_STATE state;
-    char name[32];  // Array instead of pointer to avoid kernel-user space issue
+    uint8_t state; 
+    char name[32];
     uint8_t name_len;
-} ProcessInfo;
+} __attribute__((packed)) ProcessInfo;
 
 int32_t get_process_info(ProcessInfo *buffer, uint32_t bufsize);
 
