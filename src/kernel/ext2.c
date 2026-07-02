@@ -450,17 +450,6 @@ void initialize_filesystem_ext2(){
         superBlockWrite();
         initialize_group_descriptor_table();
         initialize_bitmap();
-
-        // Zero out the actual inode tables
-        // struct BlockBuffer empty_block;
-        // memset(&empty_block, 0, BLOCK_SIZE);
-        
-        // for(uint32_t i = 0; i < GROUPS_COUNT; i++){
-        //     for(uint32_t j = 0; j < INODES_TABLE_BLOCK_COUNT; j++){
-        //         write_blocks(&empty_block, b_group_descriptor_table.table[i].bg_inode_table + j, 1);
-        //     }
-        // }
-
         initialize_root();
     }
 }

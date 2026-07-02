@@ -229,6 +229,7 @@ int32_t process_create_user_process(struct EXT2ProgramRequest request) {
     }
     new_pcb->metadata.name[request.name_len] = '\0';
     new_pcb->metadata.name_len = request.name_len;
+    new_pcb->metadata.flags = request.flags;
     
     // Mark process slot as used
     process_manager_state._process_used[p_index] = true;
@@ -239,6 +240,7 @@ int32_t process_create_user_process(struct EXT2ProgramRequest request) {
 exit_cleanup:
     return retcode;
 }
+
 
 bool process_destroy(uint32_t pid){
     for (int i = 0; i < PROCESS_COUNT_MAX; i++){

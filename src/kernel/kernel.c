@@ -23,28 +23,24 @@ void kernel_setup(void) {
     initialize_filesystem_ext2();
     gdt_install_tss();
     set_tss_register();
-    speaker_init();  // Initialize PC Speaker driver
-
+    speaker_init();
     paging_allocate_user_page_frame(&_paging_kernel_page_directory, (uint8_t*) 0);
-    // Write shell into memory
+
 
     char name[] = "shell";
     char* argv[] = {name};
-    struct EXT2ProgramRequest request = {
+    struct EXT2ProgramRequest init_process = {
         .buf         = (uint8_t*) 0,
         .name        = name,
         .name_len    = 5,
+        .flags       = 3, // 0b00000011
         .parent_inode= 2, //Root directory inode
         .buffer_size = 0x100000,
         .argc = 1,
         .argv = argv
     };
-
-    // Set TSS.esp0 for interprivilege interrupt
     set_tss_kernel_current_stack();
-
-    // Create init process and execute it
-    process_create_user_process(request);
+    process_create_user_process(init_process);
     scheduler_init();
     scheduler_switch_to_next_process();
 

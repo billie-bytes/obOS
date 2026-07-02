@@ -61,6 +61,7 @@ struct EXT2ProgramRequest
     void *buf; 
     char *name; 
     uint8_t name_len; 
+    uint8_t flags;
     uint32_t parent_inode; 
     uint32_t buffer_size;
     uint32_t argc;

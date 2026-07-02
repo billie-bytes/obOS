@@ -364,6 +364,7 @@ static int spawn_program_at(const char *prog_path, uint32_t argc, char** argv) {
         .buf          = (uint8_t*)0,
         .name         = base,
         .name_len     = (uint8_t)strlen(base),
+        .flags        = (FOREGROUND_PROCESS|TAKES_INPUT),
         .parent_inode = parent_inode,
         .buffer_size  = (2 * 1024 * 1024),
         .argc         = argc,

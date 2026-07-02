@@ -35,6 +35,7 @@ int main(int argc, char* argv[]) {
         .buf          = (uint8_t*)0,
         .name         = base,
         .name_len     = (uint8_t)strlen(base),
+        .flags        = (FOREGROUND_PROCESS|TAKES_INPUT),
         .parent_inode = parent_inode,
         .buffer_size  = process_buffer,
         .argc         = argc - 1,

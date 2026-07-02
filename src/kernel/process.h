@@ -64,7 +64,7 @@ struct Context {
     struct PageDirectory *page_directory_virtual_addr;
 };
 
-typedef enum PROCESS_STATE {
+typedef enum PROCESS_STATE : uint8_t {
     PROCESS_TERMINATED,
     PROCESS_RUNNING,
     PROCESS_READY,
@@ -81,17 +81,18 @@ typedef enum PROCESS_STATE {
 struct ProcessControlBlock {
     struct {
         uint32_t pid;
-        enum PROCESS_STATE state;
         char name[PROCESS_NAME_LENGTH_MAX];
-        uint8_t name_len;
         uint64_t wake_tick; // used when PROCESS_SLEEPING
         uint32_t cwd_inode;
+        uint8_t name_len;
+        enum PROCESS_STATE state;
+        uint8_t flags; // MSB [... | TAKES OVER KEYBOARD = 1, ELSE 0 | FG=1,BG=0] LSB
     } metadata;
 
     struct Context context;
 
     struct {
-        void     *virtual_addr_used[PROCESS_PAGE_FRAME_COUNT_MAX];
+        void *virtual_addr_used[PROCESS_PAGE_FRAME_COUNT_MAX];
         uint32_t page_frame_used_count;
     } memory;
 };

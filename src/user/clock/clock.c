@@ -1,33 +1,8 @@
 #include <stdint.h>
+#include "../command/syscall.h"
 
 #define COLOR_CLOCK 0x0F
 
-struct cmos_reader {
-    uint8_t century;
-    uint8_t second;
-    uint8_t minute;
-    uint8_t hour;
-    uint8_t day;
-    uint8_t month;
-    uint16_t year;
-};
-
-static inline void syscall_do(uint32_t eax, uint32_t ebx, uint32_t ecx, uint32_t edx) {
-    __asm__ volatile("int $0x30" : : "a"(eax), "b"(ebx), "c"(ecx), "d"(edx) : "memory");
-}
-
-static inline void sys_get_cmos(struct cmos_reader *buf) {
-    syscall_do(14, (uint32_t)buf, 0, 0);
-}
-
-static inline void sys_putchar_at(uint8_t row, uint8_t col, char c, uint8_t color) {
-    __asm__ volatile("mov %0, %%edi" : : "r"((uint32_t)color));
-    syscall_do(15, (uint32_t)row, (uint32_t)col, (uint32_t)(uint8_t)c);
-}
-
-static inline void sys_sleep(uint32_t ms) {
-    syscall_do(9, ms, 0, 0);
-}
 
 uint8_t bcd_to_binary(uint8_t bcd) {
     return ((bcd >> 4) * 10) + (bcd & 0x0F);

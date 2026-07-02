@@ -490,6 +490,13 @@ void syscall(struct InterruptFrame *frame) {
                 }
             }
             break;
+        // case 26:
+        // // fork()
+        //     {
+        //         struct ProcessControlBlock* pcb = process_get_current_running_pcb_pointer();
+        //         process_create_user_process()
+        //     }
+        //     break;
     }
 }
 void activate_timer_interrupt(void) {

@@ -3,6 +3,19 @@
 
 #include <stdint.h>
 #include "kernel/ext2.h"
+struct cmos_reader {
+    uint8_t century;
+    uint8_t second;
+    uint8_t minute;
+    uint8_t hour;
+    uint8_t day;
+    uint8_t month;
+    uint16_t year;
+};
+typedef enum PROCESS_FLAGS : uint8_t {
+    FOREGROUND_PROCESS = 1, //00000001
+    TAKES_INPUT = 2, //00000010
+} FLAGS;
 
 /**
  * @brief Core wrapper to trigger the OS system call interrupt (0x30).
@@ -31,6 +44,11 @@ static inline void sys_putchar(char c, uint8_t color) {
     syscall_do(5, (uint32_t)c, (uint32_t)color, 0);
 }
 
+static inline void sys_putchar_at(uint8_t row, uint8_t col, char c, uint8_t color) {
+    __asm__ volatile("mov %0, %%edi" : : "r"((uint32_t)color));
+    syscall_do(15, (uint32_t)row, (uint32_t)col, (uint32_t)(uint8_t)c);
+}
+
 /**
  * @brief Prints a string of characters to the framebuffer.
  * * @param s Pointer to the character array (string) to print.
@@ -51,6 +69,7 @@ static inline void sys_puts(const char *s, uint32_t len, uint8_t color) {
 static inline void sys_getchar(char *out) {
     syscall_do(4, (uint32_t)out, 0, 0);
 }
+
 
 /**
  * @brief Initializes or activates the keyboard listener state for the current process.
@@ -138,6 +157,15 @@ static inline void sys_shutdown(void) {
     syscall_do(21, 0, 0, 0);
 }
 
+static inline void sys_sleep(uint32_t ms) {
+    syscall_do(9, ms, 0, 0);
+}
+
+
+static inline void sys_get_cmos(struct cmos_reader *buf) {
+    syscall_do(14, (uint32_t)buf, 0, 0);
+}
+
 // ==========================================
 // Process Management Syscalls
 // ==========================================
@@ -151,6 +179,11 @@ static inline int32_t sys_exec(struct EXT2ProgramRequest* req) {
     int32_t retval;
     retval = syscall_do(11, (uint32_t)req, 0, 0);
     return retval;
+}
+
+static inline int32_t sys_fork() {
+    int32_t new_pid = syscall_do(26, 0, 0, 0);
+    return new_pid;
 }
 
 /**
